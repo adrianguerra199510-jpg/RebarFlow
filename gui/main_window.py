@@ -102,11 +102,11 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(splitter)
 
         self.detail = BarDetailPanel()
-        dock = QDockWidget("Detalle de barra", self)
-        dock.setWidget(self.detail)
-        dock.setMinimumWidth(380)
-        dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+        self.detail_dock = QDockWidget("Detalle de barra", self)
+        self.detail_dock.setWidget(self.detail)
+        self.detail_dock.setMinimumWidth(380)
+        self.detail_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.detail_dock)
 
         self.totals_label = QLabel()
         self.statusBar().addPermanentWidget(self.totals_label)
@@ -150,6 +150,12 @@ class MainWindow(QMainWindow):
         self.act_pdf = self._action("Exportar a PDF…", self.export_pdf, icon=sp.SP_DialogSaveButton, shortcut="Ctrl+P",
                                     tip="Planilla en PDF con el esquema de cada barra")
         self.act_about = self._action("Acerca de RebarFlow", self.about)
+        # Mostrar u ocultar el panel de detalle (la X del panel lo cierra; esta acción lo vuelve a abrir).
+        self.act_detail = self.detail_dock.toggleViewAction()
+        self.act_detail.setText("Detalle de barra")
+        self.act_detail.setShortcut("F4")
+        self.act_detail.setIcon(self.style().standardIcon(sp.SP_FileDialogInfoView))
+        self.act_detail.setStatusTip("Muestra u oculta el panel con el dibujo grande y el cálculo de la barra seleccionada")
 
         toolbar = QToolBar("Principal")
         toolbar.setMovable(False)
@@ -160,6 +166,7 @@ class MainWindow(QMainWindow):
             for action in group:
                 toolbar.addAction(action)
             toolbar.addSeparator()
+        toolbar.addAction(self.act_detail)
         self.addToolBar(toolbar)
 
         menu = self.menuBar()
@@ -173,6 +180,7 @@ class MainWindow(QMainWindow):
         bar_menu = menu.addMenu("&Barra")
         for action in (self.act_add_bar, self.act_edit_bar, self.act_delete_bar):
             bar_menu.addAction(action)
+        menu.addMenu("&Ver").addAction(self.act_detail)
         menu.addMenu("A&yuda").addAction(self.act_about)
 
         # Ins / Supr actúan sobre la lista de barras cuando tiene el foco.

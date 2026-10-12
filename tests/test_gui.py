@@ -495,3 +495,17 @@ def test_open_catalog_example_from_the_menu(window):
     pictures = [r for r in range(window.bars_table.rowCount()) if window.bars_table.line_for_row(r)]
     assert all(not window.bars_table.item(r, 2).icon().isNull() for r in pictures)
     assert window.plan_table.rowCount() > 1 and window.act_catalog.text().startswith("Abrir ejemplo")
+
+
+def test_closed_detail_panel_can_be_reopened(window):
+    dock = window.detail_dock
+    assert not dock.isHidden()
+    dock.close()  # la X del panel
+    assert dock.isHidden()
+    window.act_detail.trigger()  # menú Ver → Detalle de barra (también el botón de la barra y F4)
+    assert not dock.isHidden() and window.act_detail.isChecked()
+    window.act_detail.trigger()
+    assert dock.isHidden() and not window.act_detail.isChecked()
+    menus = {action.text().replace("&", ""): action.menu() for action in window.menuBar().actions()}
+    assert window.act_detail in menus["Ver"].actions()
+    assert window.act_detail.shortcut().toString() == "F4"

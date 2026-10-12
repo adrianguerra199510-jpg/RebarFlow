@@ -170,7 +170,8 @@ comercial (6, 9 y 12 m) y se recomienda la que menos acero compra.
   la barra comercial.
 * **Planilla del proyecto**, **Resumen** (peso por diámetro, sobrante, retales reutilizables, consolidado por nivel y longitud
   comercial recomendada) y **Plan de corte**.
-* **Panel de detalle**: dibujo grande y desglose del cálculo de la barra seleccionada.
+* **Panel de detalle**: dibujo grande y desglose del cálculo de la barra seleccionada. Si se cierra con su X, se vuelve a abrir
+  con *Ver → Detalle de barra*, el botón «Detalle de barra» de la barra de herramientas o F4.
 * Guardar/abrir proyectos (`.rebarflow`, JSON legible), propiedades del proyecto (barra comercial, redondeo, retal reutilizable,
   papel), ejemplos (*Abrir ejemplo* y *Abrir ejemplo: catálogo de formas*) y exportación a Excel y PDF. Atajos: Ctrl+N/O/S,
   Ctrl+Shift+N (elemento), Ctrl+B (barra), Ctrl+E (Excel), Ctrl+P (PDF).
