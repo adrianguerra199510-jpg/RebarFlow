@@ -4,7 +4,8 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QDialogButtonBox  # noqa: E402
+from PySide6.QtCore import QTimer  # noqa: E402
+from PySide6.QtWidgets import QApplication, QDialogButtonBox  # noqa: E402
 
 from core.element import ElementType  # noqa: E402
 from core.rebar import get_rebar  # noqa: E402
@@ -244,3 +245,47 @@ def test_project_dialog_applies_values(qapp):
     dialog.paper.setCurrentIndex(dialog.paper.findData("a4"))
     dialog.apply_to(project)
     assert (project.name, project.stock_length_mm, project.length_rounding_mm, project.paper) == ("Torre Norte", 9000, 10, "a4")
+
+
+# ------------------------------------------------------------------ confirmaciones en español
+def click_button(label: str, texts: list[str]) -> None:
+    """Programa el clic en el botón ``label`` del diálogo modal que esté abierto."""
+    def click():
+        box = QApplication.activeModalWidget()
+        texts.extend(b.text() for b in box.buttons())
+        next(b for b in box.buttons() if b.text() == label).click()
+    QTimer.singleShot(100, click)
+
+
+def test_yes_no_dialog_uses_spanish_buttons(window):
+    texts: list[str] = []
+    click_button("Sí", texts)
+    assert window._ask("Título", "¿Seguro?") is True
+    assert texts == ["Sí", "No"]
+    click_button("No", [])
+    assert window._ask("Título", "¿Seguro?") is False
+
+
+def test_discard_changes_dialog(window):
+    assert window._confirm_discard() is True  # sin cambios no pregunta
+    window.modified = True
+    texts: list[str] = []
+    click_button("Descartar", texts)
+    assert window._confirm_discard() is True
+    assert sorted(texts) == ["Cancelar", "Descartar", "Guardar"]  # Qt los ordena por rol
+    click_button("Cancelar", [])
+    assert window._confirm_discard() is False
+    window.modified = False
+
+
+def test_delete_slots_ask_for_confirmation(window, monkeypatch):
+    element = select_element(window, "V-101", "Nivel 1")
+    window.bars_table.selectRow(0)
+    monkeypatch.setattr(MainWindow, "_ask", lambda self, title, text: False)
+    window.delete_bar()
+    assert len(element.groups) == 4  # respondió "No": no se borra
+    monkeypatch.setattr(MainWindow, "_ask", lambda self, title, text: True)
+    window.delete_bar()
+    assert len(element.groups) == 3
+    window.delete_element()
+    assert all(e.name != "V-101" or e.level != "Nivel 1" for e in window.project.elements)

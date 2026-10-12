@@ -348,10 +348,8 @@ class MainWindow(QMainWindow):
         element = self._element
         if element is None:
             return
-        answer = QMessageBox.question(
-            self, "Eliminar elemento",
-            f"¿Eliminar el elemento {element.name} ({element.level}) y sus {len(element.groups)} marcas de barras?")
-        if answer == QMessageBox.StandardButton.Yes:
+        if self._ask("Eliminar elemento",
+                     f"¿Eliminar el elemento {element.name} ({element.level}) y sus {len(element.groups)} marcas de barras?"):
             self.delete_element_object(element)
 
     # ------------------------------------------------------------------ barras
@@ -405,8 +403,7 @@ class MainWindow(QMainWindow):
         element, line = self._element, self.current_line()
         if element is None or line is None:
             return
-        answer = QMessageBox.question(self, "Eliminar barra", f"¿Eliminar la marca {line.mark} de {element.name}?")
-        if answer == QMessageBox.StandardButton.Yes:
+        if self._ask("Eliminar barra", f"¿Eliminar la marca {line.mark} de {element.name}?"):
             self.delete_group(element, line.group)
 
     # ------------------------------------------------------------------ proyecto y archivos
@@ -417,15 +414,26 @@ class MainWindow(QMainWindow):
             self._mark_modified()
             self.refresh()
 
+    def _ask(self, title: str, text: str) -> bool:
+        """Pregunta de sí/no con los botones en español."""
+        box = QMessageBox(QMessageBox.Icon.Question, title, text, parent=self)
+        yes = box.addButton("Sí", QMessageBox.ButtonRole.YesRole)
+        box.addButton("No", QMessageBox.ButtonRole.NoRole)
+        box.exec()
+        return box.clickedButton() is yes
+
     def _confirm_discard(self) -> bool:
         if not self.modified:
             return True
-        box = QMessageBox.question(
-            self, "Cambios sin guardar", f"El proyecto «{self.project.name}» tiene cambios sin guardar. ¿Guardarlos?",
-            QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel)
-        if box == QMessageBox.StandardButton.Save:
+        box = QMessageBox(QMessageBox.Icon.Question, "Cambios sin guardar",
+                          f"El proyecto «{self.project.name}» tiene cambios sin guardar. ¿Guardarlos?", parent=self)
+        save = box.addButton("Guardar", QMessageBox.ButtonRole.AcceptRole)
+        discard = box.addButton("Descartar", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is save:
             return self.save_project_file()
-        return box == QMessageBox.StandardButton.Discard
+        return box.clickedButton() is discard
 
     def set_project(self, project: Project, path: Path | None = None) -> None:
         self.project, self.path, self.modified, self._element = project, path, False, None
@@ -511,8 +519,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, f"No se pudo exportar a {kind}", str(exc))
             return
         self.statusBar().showMessage(f"Planilla exportada a {path}", 8000)
-        answer = QMessageBox.question(self, "Exportación completa", f"Se creó {path.name}.\n¿Abrirlo ahora?")
-        if answer == QMessageBox.StandardButton.Yes:
+        if self._ask("Exportación completa", f"Se creó {path.name}.\n¿Abrirlo ahora?"):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def export_excel(self) -> None:
