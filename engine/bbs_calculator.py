@@ -19,6 +19,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import groupby
 
+from core.coupler import COUPLER_ORDER
 from core.element import RebarGroup, StructuralElement
 from core.rebar import Rebar
 from core.shape_codes import ShapeCode
@@ -68,6 +69,25 @@ class ScheduleLine:
     @property
     def warnings(self) -> tuple[str, ...]:
         return self.group.cut.warnings
+
+    @property
+    def couplers(self) -> tuple[str, ...]:
+        """Tipo de coupler de cada extremo que lo lleva, por barra (``"short"`` o ``"long"``)."""
+        return self.group.cut.couplers
+
+    @property
+    def coupler_text(self) -> str:
+        """Couplers de cada barra como ``"2 × rosca corta"`` (vacío si no lleva)."""
+        return self.group.cut.coupler_text
+
+
+@dataclass(frozen=True)
+class CouplerCount:
+    """Cantidad de couplers de un tipo en una barra (designación y grado) de todo el proyecto."""
+
+    rebar: Rebar
+    kind: str  # "short" o "long"
+    count: int
 
 
 @dataclass(frozen=True)
@@ -214,6 +234,20 @@ class BBSResult:
     def dimension_labels(self) -> list[str]:
         """Rótulos de cota presentes en las formas usadas ("A", "B", "C"…), ordenados."""
         return dimension_labels(self.lines)
+
+    @property
+    def warnings(self) -> tuple[tuple[str, str, str], ...]:
+        """Avisos de norma de la planilla como ``(elemento, marca, texto)``."""
+        return tuple((line.element.name, line.mark, text) for line in self.lines for text in line.warnings)
+
+    def coupler_counts(self) -> tuple[CouplerCount, ...]:
+        """Couplers del proyecto por barra y tipo (barras por elemento x cantidad de elementos x extremos con coupler)."""
+        counts: dict[tuple[Rebar, str], int] = {}
+        for line in self.lines:
+            for kind in line.couplers:
+                counts[(line.rebar, kind)] = counts.get((line.rebar, kind), 0) + line.total_bars
+        order = lambda item: (item[0][0].bar_number, item[0][0].grade.fy_mpa, COUPLER_ORDER.index(item[0][1]))  # noqa: E731
+        return tuple(CouplerCount(rebar, kind, count) for (rebar, kind), count in sorted(counts.items(), key=order))
 
     @property
     def levels(self) -> tuple[str, ...]:

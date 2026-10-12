@@ -10,6 +10,7 @@ from core.element import ElementType, StructuralElement
 from core.shape_codes import (
     LBar,
     Stirrup,
+    StraightBar,
     UBar,
     available_shapes,
     create_shape,
@@ -450,3 +451,96 @@ def test_sketch_image_keeps_every_label_inside_the_picture(code, size):
     border += [image.getpixel((x, y)) for y in range(height) for x in (0, width - 1)]
     not_bar = [p for p in border if p[3] > 60 and sum((a - b) ** 2 for a, b in zip(p[:3], BAR_COLOR[:3])) > 25**2]
     assert not not_bar
+
+
+# ------------------------------------------------------------------ couplers
+def test_coupler_on_a_free_end_does_not_change_the_cut_length():
+    plain = StraightBar(3000).cut_length(N5)
+    both = StraightBar(3000, coupler_start="short", coupler_end="long").cut_length(N5)
+    assert both.total_mm == plain.total_mm == 3000
+    assert plain.couplers == () and plain.coupler_text == ""
+    assert both.couplers == ("short", "long") and both.coupler_text == "rosca corta + rosca larga"
+    assert StraightBar(3000, coupler_end="short").cut_length(N5).coupler_text == "rosca corta"
+    assert StraightBar(3000, coupler_start="long", coupler_end="long").cut_length(N5).coupler_text == "2 × rosca larga"
+
+
+@pytest.mark.parametrize("shape", [
+    ZBar(coupler_start="short", coupler_end="long"), CrankBar(coupler_end="long"),
+    OmegaBar(coupler_start="long", coupler_end="short"),
+    CustomBar(legs=(400, 300), angles=(90,), coupler_start="short"), LBar(1200, 300, coupler_start="long"),
+])
+def test_every_open_bar_template_takes_couplers(shape):
+    cut = shape.cut_length(N5)
+    assert cut.couplers and shape.sketch(N5).boxes
+    without = type(shape)(**{p.name: getattr(shape, p.name) for p in type(shape).parameters()
+                             if not p.name.startswith("coupler")})
+    assert cut.total_mm == pytest.approx(without.cut_length(N5).total_mm)  # el coupler es un accesorio
+
+
+def test_coupler_is_not_allowed_on_an_end_that_finishes_in_a_hook():
+    with pytest.raises(GeometryError, match="extremo inicial termina en gancho"):
+        HookedBar(a=1000, hook_start=90, hook_end=0, coupler_start="short").cut_length(N5)
+    with pytest.raises(GeometryError, match="extremo final termina en gancho"):
+        HookedBar(a=1000, hook_start=0, hook_end=135, coupler_end="long", style="stirrup").cut_length(N3)
+    with pytest.raises(GeometryError, match="extremo final termina en gancho"):
+        CustomBar(legs=(400, 300), angles=(90,), hook_end=90, coupler_end="short").cut_length(N5)
+    # la pata corta de una L es su gancho; el otro extremo sí admite coupler
+    assert LBar(1200, 300, coupler_start="short").cut_length(N5).couplers == ("short",)
+    assert "coupler_end" not in [p.name for p in LBar.parameters()]
+    assert not any(p.name.startswith("coupler") for p in UBar.parameters())  # sus dos extremos son ganchos
+    assert HookedBar(a=1000, hook_start=90, hook_end=0, coupler_end="long").cut_length(N5).couplers == ("long",)
+
+
+def test_coupler_is_drawn_as_a_rectangle_at_the_end_with_its_type():
+    sketch = StraightBar(3000, coupler_start="short", coupler_end="long").sketch(N5)
+    assert [(b.kind, b.text) for b in sketch.boxes] == [("short", "RC"), ("long", "RL")]
+    assert sketch.boxes[0].at == (0.0, 0.0) and sketch.boxes[0].heading_deg == 180.0  # sale por la izquierda
+    assert sketch.boxes[1].at == (1.0, 0.0) and sketch.boxes[1].heading_deg == 0.0
+    assert StraightBar(3000).sketch(N5).boxes == ()
+    from exporters.shape_images import render_sketch
+
+    def teal(image):  # píxeles del relleno del coupler
+        data = image.tobytes()
+        return sum(1 for r, g, b, a in zip(data[0::4], data[1::4], data[2::4], data[3::4])
+                   if a > 200 and abs(r - 200) < 12 and abs(g - 228) < 12)
+
+    with_coupler = render_sketch(StraightBar(3000, coupler_end="short").sketch(N5), 640, 240)
+    long_coupler = render_sketch(StraightBar(3000, coupler_end="long").sketch(N5), 640, 240)
+    assert teal(render_sketch(StraightBar(3000).sketch(N5), 640, 240)) == 0
+    assert teal(with_coupler) > 200 and teal(long_coupler) > 1.4 * teal(with_coupler)  # rosca larga: rectángulo más largo
+
+
+def test_coupler_counts_by_bar_and_type_in_the_project():
+    element = StructuralElement("C-1", ElementType.COLUMN, "Nivel 1", 6)
+    element.add_group("A", N5, StraightBar(3000, coupler_end="short"), 4)
+    element.add_group("B", N5, StraightBar(3000, coupler_start="long", coupler_end="short"), 2)
+    element.add_group("C", N6, ZBar(coupler_start="long"), 1)
+    element.add_group("D", N5, StraightBar(2000), 5)  # sin couplers
+    result = BBSCalculator().calculate([element])
+    assert [(c.rebar.designation, c.kind, c.count) for c in result.coupler_counts()] == [
+        ("#5", "short", 36), ("#5", "long", 12), ("#6", "long", 6)]
+    assert BBSCalculator().calculate([]).coupler_counts() == ()
+
+
+def test_couplers_are_listed_in_the_summaries_and_the_header_legend(tmp_path):
+    from openpyxl import load_workbook
+
+    from exporters.excel_exporter import ExcelExporter
+
+    element = StructuralElement("C-1", ElementType.COLUMN, "Nivel 1", 2)
+    element.add_group("A", N5, StraightBar(3000, coupler_end="short"), 4)
+    element.add_group("B", N5, StraightBar(3000, coupler_start="long"), 1)
+    result = BBSCalculator().calculate([element])
+    wb = load_workbook(ExcelExporter().export(result, tmp_path / "c.xlsx"))
+    summary = wb["Resumen"]
+    texts = [str(summary.cell(r, 1).value) for r in range(1, summary.max_row + 1)]
+    title = next(i for i, t in enumerate(texts, start=1) if "Couplers por barra y tipo" in t)
+    assert summary.cell(title + 2, 3).value == "Rosca corta (RC)" and summary.cell(title + 2, 4).value == 8
+    assert summary.cell(title + 3, 3).value == "Rosca larga (RL)" and summary.cell(title + 3, 4).value == 2
+    assert summary.cell(title + 4, 4).value == 10  # total
+    assert "RC = coupler de rosca corta, RL = coupler de rosca larga" in wb["Planilla BBS"]["B4"].value
+    plain = StructuralElement("C-2", ElementType.COLUMN, "Nivel 1", 1)
+    plain.add_group("A", N5, StraightBar(3000), 4)
+    wb = load_workbook(ExcelExporter().export(BBSCalculator().calculate([plain]), tmp_path / "p.xlsx"))
+    assert not any("Couplers" in str(c.value) for row in wb["Resumen"].iter_rows() for c in row)
+    assert "RC =" not in wb["Planilla BBS"]["B4"].value

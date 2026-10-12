@@ -33,8 +33,10 @@ def test_workbook_structure_and_totals(result, tmp_path):
 
     ws = wb["Planilla BBS"]
     headers = [c.value for c in ws[7]]
-    assert headers[:5] == ["Marca", "Barra", "Ø (mm)", "Esquema", "Forma"]
+    assert headers[:3] == ["Marca", "Barra", "Esquema"]
     assert {"A", "B", "C"} <= set(headers)
+    for removed in ("Ø (mm)", "Forma", "Ganchos (° · mm)", "Observaciones"):
+        assert removed not in headers
     weight_col = headers.index("Peso total (kg)") + 1
 
     total_row = find_row(ws, "TOTAL GENERAL")
@@ -55,8 +57,12 @@ def test_line_values_and_warnings(result, tmp_path):
     assert ws.cell(row, col["Total barras"]).value == 38 * 4
     assert ws.cell(row, col["A"]).value == 220 and ws.cell(row, col["B"]).value == 420
 
+    # la marca con aviso va en rojo y el texto se lista en un bloque «Avisos» bajo la planilla
     short = next(r for r in range(8, ws.max_row + 1) if ws.cell(r, 1).value == "E2")
-    assert "⚠" in ws.cell(short, col["Observaciones"]).value
+    assert ws.cell(short, 1).font.color.rgb.endswith("C00000") and ws.cell(row, 1).font.color is None
+    assert ws.cell(find_row(ws, "Avisos"), 1).value == "Avisos"
+    texts = [str(ws.cell(r, 1).value) for r in range(1, ws.max_row + 1) if "⚠" in str(ws.cell(r, 1).value)]
+    assert len(texts) == 1 and "V-101 · marca E2" in texts[0] and "mínimo normativo" in texts[0]
 
 
 def test_summary_sheet(result, tmp_path):
@@ -79,7 +85,7 @@ def test_empty_result_exports(tmp_path):
 def test_shape_images_are_embedded_one_per_line(result, tmp_path):
     ws = load_workbook(ExcelExporter().export(result, tmp_path / "bbs.xlsx"))["Planilla BBS"]
     assert len(ws._images) == len(result.lines)
-    assert all(img.anchor._from.col == 3 for img in ws._images)  # columna "Esquema"
+    assert all(img.anchor._from.col == 2 for img in ws._images)  # columna "Esquema"
 
 
 def test_images_can_be_disabled(result, tmp_path):

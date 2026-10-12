@@ -122,15 +122,14 @@ def test_excel_plan_sheet(tmp_path):
     assert any(summary.cell(r, 10).value is not None and summary.cell(r, 1).value == "TOTAL" for r in range(1, summary.max_row + 1))
 
 
-def test_excel_hook_column_matches_the_schedule(tmp_path):
+def test_hook_text_is_still_available_per_line_but_not_a_table_column(tmp_path):
     result = sample_result()
+    texts = {line.mark: line.hook_text for line in result.lines}
+    assert texts["E1"] in ("2 × 135° · 76", "2 × 135° · 75")  # estribo #3 (75) o #4 (76)
+    assert texts["A2"].startswith("2 × 90°")  # U con ganchos de 90°
+    assert texts["A1"] == ""  # barra recta: sin ganchos
     ws = load_workbook(ExcelExporter().export(result, tmp_path / "h.xlsx"))["Planilla BBS"]
-    headers = [c.value for c in ws[7]]
-    column = headers.index("Ganchos (° · mm)") + 1
-    values = {ws.cell(r, 1).value: ws.cell(r, column).value for r in range(8, ws.max_row + 1) if ws.cell(r, 1).value}
-    assert values["E1"] == "2 × 135° · 76" or values["E1"] == "2 × 135° · 75"  # estribo #3 (75) o #4 (76)
-    assert values["A2"].startswith("2 × 90°")  # U con ganchos de 90°
-    assert values["A1"] in (None, "")  # barra recta: sin ganchos
+    assert "Ganchos (° · mm)" not in [c.value for c in ws[7]]
 
 
 def test_pdf_has_the_cutting_plan_pages(tmp_path):
@@ -155,7 +154,7 @@ def test_catalog_project_uses_every_builtin_template_and_exports(tmp_path):
     assert element.element_type is ElementType.OTHER
     assert {g.shape.code for g in element.groups} == {"R", "L", "U", "E", "G", "EU", "Z", "Q", "O", "ET", "ETR", "AR", "ES", "X"}
     result = BBSCalculator(project.stock_length_mm, project.length_rounding_mm, project.reusable_remnant_mm).calculate(project.elements)
-    assert len(result.lines) == 21 and result.total_weight_kg > 0
+    assert len(result.lines) == 23 and result.total_weight_kg > 0
     assert not [w for line in result.lines for w in line.warnings]  # el ejemplo cumple los mínimos de la norma
     assert next(line for line in result.lines if line.mark == "ES1").shape.from_coil
     assert ExcelExporter(project.name).export(result, tmp_path / "c.xlsx").exists()

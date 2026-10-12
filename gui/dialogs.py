@@ -486,6 +486,8 @@ class BarDialog(QDialog):
             )
             if cut.hooks:
                 html += f"<br><span style='color:#B05504'>Ganchos (° · mm): {escape(cut.hook_text)}</span>"
+            if cut.couplers:
+                html += f"<br><span style='color:#00695C'>Couplers: {escape(cut.coupler_text)}</span>"
             html += "".join(f"<br><span style='color:#595959'>{escape(n)}</span>" for n in cut.notes)
             html += "".join(f"<br><span style='color:#C00000'><b>Aviso:</b> {escape(w)}</span>" for w in cut.warnings)
             self._group = group

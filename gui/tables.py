@@ -10,11 +10,12 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QHeaderView, QLabel, QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from core.coupler import coupler_label
 from engine.bbs_calculator import BBSResult, ElementSchedule, ScheduleLine
 from engine.cutting_report import plan_rows, plan_title, stock_comparison
 from gui.widgets import pattern_pixmap, shape_pixmap
 
-IMG_W, IMG_H = 160, 60
+IMG_W, IMG_H = 176, 66
 _BAND = QColor("#D9E1F2")
 _SUBTOTAL = QColor("#F2F2F2")
 _NAVY = QColor("#1F3864")
@@ -47,10 +48,9 @@ class ScheduleTable(QTableWidget):
     con ``grouped=False`` muestra las barras de un solo elemento.
     """
 
-    FIXED = ["Marca", "Barra", "Ø (mm)", "Esquema", "Forma"]
-    TAIL = ["Cant. por elem.", "Total barras", "Long. corte (mm)", "Peso unit. (kg)", "Long. total (m)",
-            "Peso total (kg)", "Observaciones"]
-    _HEADER_BREAKS = {"Ganchos (° · mm)": "Ganchos\n(° · mm)", "Cant. por elem.": "Cant.\npor elem.", "Total barras": "Total\nbarras",
+    FIXED = ["Marca", "Barra", "Esquema"]
+    TAIL = ["Cant. por elem.", "Total barras", "Long. corte (mm)", "Peso unit. (kg)", "Long. total (m)", "Peso total (kg)"]
+    _HEADER_BREAKS = {"Cant. por elem.": "Cant.\npor elem.", "Total barras": "Total\nbarras",
                       "Long. corte (mm)": "Long. corte\n(mm)", "Peso unit. (kg)": "Peso unit.\n(kg)",
                       "Long. total (m)": "Long. total\n(m)", "Peso total (kg)": "Peso total\n(kg)"}
 
@@ -74,7 +74,7 @@ class ScheduleTable(QTableWidget):
         return next((row for row, line in self._lines.items() if line.mark == mark), None)
 
     def populate(self, schedules: Sequence[ElementSchedule], dim_labels: list[str]) -> None:
-        headers = self.FIXED + dim_labels + ["Ganchos (° · mm)"] + self.TAIL
+        headers = self.FIXED + dim_labels + self.TAIL
         col = {name: i for i, name in enumerate(headers)}
         n_cols = len(headers)
         self.clear()
@@ -111,37 +111,35 @@ class ScheduleTable(QTableWidget):
             self._fill_totals(row, col, length, weight, _NAVY, QColor("white"))
             self.setRowHeight(row, 28)
 
-        widths = {"Marca": 60, "Barra": 54, "Ø (mm)": 66, "Esquema": IMG_W + 16, "Forma": 58, "Ganchos (° · mm)": 96, "Cant. por elem.": 76,
+        widths = {"Marca": 60, "Barra": 54, "Esquema": IMG_W + 16, "Cant. por elem.": 76,
                   "Total barras": 66, "Long. corte (mm)": 92, "Peso unit. (kg)": 84, "Long. total (m)": 88,
                   "Peso total (kg)": 88}
         for name, index in col.items():
             self.setColumnWidth(index, widths.get(name, 58))  # cotas A, B, C: 58
         header = self.horizontalHeader()
-        header.setSectionResizeMode(col["Observaciones"], QHeaderView.ResizeMode.Stretch)
+        header.setStretchLastSection(True)
         header.setMinimumSectionSize(44)
         header.setFixedHeight(42)
 
     def _fill_line(self, row: int, line: ScheduleLine, col: dict[str, int], dim_labels: list[str]) -> None:
         dims = line.shape.dimensions()
         self.setRowHeight(row, IMG_H + 8)
-        self.setItem(row, col["Marca"], _item(line.mark, _CENTER, bold=True))
+        mark = _item(line.mark, _CENTER, bold=True, fg=_RED if line.warnings else None)
+        if line.warnings:  # el aviso de norma sale en la marca (en rojo) y en el detalle de la barra
+            mark.setToolTip("\n".join(f"AVISO: {w}" for w in line.warnings))
+        self.setItem(row, col["Marca"], mark)
         self.setItem(row, col["Barra"], _item(line.rebar.designation, _CENTER))
-        self.setItem(row, col["Ø (mm)"], _item(f"{line.rebar.diameter_mm:.1f}", _CENTER))
         picture = _item("", _CENTER)
         picture.setIcon(QIcon(shape_pixmap(line.shape, IMG_W, IMG_H, line.rebar)))
         self.setItem(row, col["Esquema"], picture)
-        self.setItem(row, col["Forma"], _item(line.shape.code, _CENTER, bold=True))
         for label in dim_labels:
             self.setItem(row, col[label], _item(f"{dims[label]:,.0f}" if label in dims else "", _RIGHT))
-        self.setItem(row, col["Ganchos (° · mm)"], _item(line.hook_text, _CENTER))
         self.setItem(row, col["Cant. por elem."], _item(line.group.quantity, _CENTER))
         self.setItem(row, col["Total barras"], _item(f"{line.total_bars:,}", _CENTER))
         self.setItem(row, col["Long. corte (mm)"], _item(f"{line.cut_length_mm:,.0f}", _RIGHT))
         self.setItem(row, col["Peso unit. (kg)"], _item(f"{line.unit_weight_kg:,.2f}", _RIGHT))
         self.setItem(row, col["Long. total (m)"], _item(f"{line.total_length_m:,.2f}", _RIGHT))
         self.setItem(row, col["Peso total (kg)"], _item(f"{line.total_weight_kg:,.2f}", _RIGHT, bold=True))
-        remark = "\n".join(list(line.notes) + [f"AVISO: {w}" for w in line.warnings])
-        self.setItem(row, col["Observaciones"], _item(remark, fg=_RED if line.warnings else None))
 
     def _fill_totals(self, row: int, col: dict[str, int], length: float, weight: float, bg: QColor,
                      fg: QColor | None) -> None:
@@ -257,6 +255,13 @@ class SummaryView(QScrollArea):
                             + [f"{c.best_mm / 1000:.2f} m" if c.best_mm else "—"])
             section("4. Longitud comercial recomendada (barras · sobrante, con el plan optimizado de cada una)",
                     _data_table(["Barra", "Grado", *[f"{l / 1000:.2f} m" for l in lengths], "Recomendada"], rows, None))
+        couplers = result.coupler_counts()
+        if couplers:
+            section(f"{5 if comparisons else 4}. Couplers por barra y tipo", _data_table(
+                ["Barra", "Grado", "Tipo de coupler", "Cantidad"],
+                [[c.rebar.designation, c.rebar.grade.name, coupler_label(c.kind), n(c.count, 0)] for c in couplers],
+                ["TOTAL", "", "", n(sum(c.count for c in couplers), 0)],
+            ))
         layout.addStretch(1)
         self.setWidget(body)
 

@@ -21,7 +21,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from core.rebar import Rebar
 from core.shape_codes import ShapeCode
-from core.sketch import DimLabel, Sketch
+from core.sketch import Box, DimLabel, Sketch
 
 #: Proporción ancho:alto de las celdas de esquema en las planillas (8:3).
 ASPECT = 8 / 3
@@ -30,6 +30,8 @@ TEXT_COLOR = (70, 70, 70, 255)
 HOOK_COLOR = (176, 85, 4, 255)
 ANGLE_COLOR = (110, 110, 110, 255)
 GUIDE_COLOR = (150, 150, 150, 255)
+COUPLER_COLOR = (0, 105, 92, 255)
+COUPLER_FILL = (200, 228, 224, 255)
 
 _SUPERSAMPLE = 4
 _DIAGONAL = 0.4  # componente mínima en ambos ejes para colocar un rótulo en diagonal
@@ -50,15 +52,15 @@ def render_sketch(sketch: Sketch, width: int, height: int, *, bar_color: tuple[i
     font_px = max(8 * ss, round(ref * 0.21 * (1.0 if crowd <= 5 else max(0.7, 1.0 - 0.07 * (crowd - 5)))))
     fonts = {"dim": ImageFont.load_default(size=font_px)}
     small = ImageFont.load_default(size=max(7 * ss, round(font_px * _SMALL_FONT)))
-    fonts["hook"] = fonts["angle"] = small
-    colors = {"dim": text_color, "hook": HOOK_COLOR, "angle": ANGLE_COLOR}
+    fonts["hook"] = fonts["angle"] = fonts["coupler"] = small
+    colors = {"dim": text_color, "hook": HOOK_COLOR, "angle": ANGLE_COLOR, "coupler": COUPLER_COLOR}
     line_w = max(3 * ss, round(ref * 0.05))
     gap = line_w // 2 + 3 * ss
 
     image = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
 
-    points = [p for path in (*sketch.paths, *sketch.guides) for p in path]
+    points = [p for path in (*sketch.paths, *sketch.guides) for p in path] + [box.at for box in sketch.boxes]
     min_x, max_x = min(p[0] for p in points), max(p[0] for p in points)
     min_y, max_y = min(p[1] for p in points), max(p[1] for p in points)
     span_x, span_y = max_x - min_x, max_y - min_y
@@ -91,14 +93,33 @@ def render_sketch(sketch: Sketch, width: int, height: int, *, bar_color: tuple[i
         # La caja es la de la tinta real del texto con ese ancla (la línea de texto es más alta que la tinta).
         return draw.textbbox(pos, label.text, font=fonts[label.kind], anchor=anchor), anchor, pos
 
+    def coupler_corners(box: Box, to_px) -> list[tuple[float, float]]:
+        """Esquinas, en píxeles, del rectángulo de un coupler (tamaño en múltiplos del grosor de la barra)."""
+        cx, cy = to_px(box.at)
+        ux, uy = math.cos(math.radians(box.heading_deg)), -math.sin(math.radians(box.heading_deg))
+        half_l = line_w * (1.8 if box.kind == "short" else 3.2)
+        half_w = line_w * 1.5
+        return [(cx + ux * a * half_l - uy * b * half_w, cy + uy * a * half_l + ux * b * half_w)
+                for a, b in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+
+    def box_labels() -> list[tuple[DimLabel, float]]:
+        """Rótulo de cada coupler (más allá de su rectángulo) y cuánto se aleja del extremo de la barra (px)."""
+        return [(DimLabel(box.text, box.at, (math.cos(math.radians(box.heading_deg)), math.sin(math.radians(box.heading_deg))),
+                          kind="coupler"), line_w * (1.8 if box.kind == "short" else 3.2)) for box in sketch.boxes if box.text]
+
     def layout(to_px) -> list[tuple[tuple[float, float, float, float], str, tuple[float, float]]]:
         """Posición de todos los rótulos; uno que pisaría a otro ya colocado se aleja de su punto en pasos."""
         placed: list[tuple[tuple[float, float, float, float], str, tuple[float, float]]] = []
-        for label in sketch.labels:
+        occupied = []  # los rectángulos de los couplers también son obstáculos para los rótulos
+        for box in sketch.boxes:
+            xs, ys = zip(*coupler_corners(box, to_px))
+            occupied.append((min(xs), min(ys), max(xs), max(ys)))
+        for label, base in [(label, 0.0) for label in sketch.labels] + box_labels():
             for k in range(7):
-                item = place(label, to_px, k * font_px * 0.5)
+                item = place(label, to_px, base + k * font_px * 0.5)
                 a = item[0]
-                if not any(a[0] < b[0][2] and b[0][0] < a[2] and a[1] < b[0][3] and b[0][1] < a[3] for b in placed):
+                if not any(a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+                           for b in [*occupied, *(p[0] for p in placed)]):
                     break
             placed.append(item)
         return placed
@@ -108,6 +129,9 @@ def render_sketch(sketch: Sketch, width: int, height: int, *, bar_color: tuple[i
     for _ in range(6):
         to_px = transform(pad)
         boxes = [item[0] for item in layout(to_px)]
+        for box in sketch.boxes:  # el rectángulo de un coupler también debe caber en la imagen
+            xs, ys = zip(*coupler_corners(box, to_px))
+            boxes.append((min(xs), min(ys), max(xs), max(ys)))
         edge = 2.0 * ss  # los textos no deben tocar el borde de la imagen
         over = {"l": max([0.0] + [edge - b[0] for b in boxes]), "r": max([0.0] + [b[2] - (w - edge) for b in boxes]),
                 "t": max([0.0] + [edge - b[1] for b in boxes]), "b": max([0.0] + [b[3] - (h - edge) for b in boxes])}
@@ -132,7 +156,10 @@ def render_sketch(sketch: Sketch, width: int, height: int, *, bar_color: tuple[i
         for x, y in (pixels[0], pixels[-1]):  # extremos redondeados
             draw.ellipse((x - line_w / 2, y - line_w / 2, x + line_w / 2, y + line_w / 2), fill=bar_color)
 
-    for label, (_, anchor, pos) in zip(sketch.labels, layout(to_px)):
+    for box in sketch.boxes:  # couplers: rectángulos sobre el extremo de la barra
+        draw.polygon(coupler_corners(box, to_px), fill=COUPLER_FILL, outline=COUPLER_COLOR, width=max(ss, line_w // 3))
+
+    for label, (_, anchor, pos) in zip([*sketch.labels, *(lab for lab, _ in box_labels())], layout(to_px)):
         draw.text(pos, label.text, fill=colors[label.kind], font=fonts[label.kind], anchor=anchor)
 
     return image.resize((width, height), Image.LANCZOS)

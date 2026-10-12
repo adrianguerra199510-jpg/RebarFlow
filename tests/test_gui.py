@@ -64,7 +64,7 @@ def test_window_loads_project_tree_and_tables(window):
 def test_every_bar_row_has_a_shape_image(window):
     for row in range(window.project_table.rowCount()):
         if window.project_table.line_for_row(row) is not None:
-            icon = window.project_table.item(row, 3).icon()  # columna "Esquema"
+            icon = window.project_table.item(row, 2).icon()  # columna "Esquema"
             assert not icon.isNull() and not icon.pixmap(160, 60).isNull()
 
 
@@ -269,6 +269,25 @@ def test_bar_dialog_spiral_extra_turns_and_hooks(qapp):
     assert "2 al inicio y 0.5 al final" in dialog.info.text() and "90° · 75" in dialog.info.text()
 
 
+def test_bar_dialog_couplers_on_free_ends_only(qapp):
+    dialog = BarDialog(None)
+    dialog.shape.setCurrentIndex(dialog.shape.findText("R · Recta"))
+    assert list(dialog._widgets) == ["length", "coupler_start", "coupler_end"]
+    assert [dialog._widgets["coupler_end"].itemText(i) for i in range(3)] == ["Sin coupler", "Rosca corta", "Rosca larga"]
+    _choose(dialog, "coupler_start", "short")
+    _choose(dialog, "coupler_end", "long")
+    shape = dialog.result_group().shape
+    assert (shape.coupler_start, shape.coupler_end) == ("short", "long")
+    assert "Couplers: rosca corta + rosca larga" in dialog.info.text() and ok_enabled(dialog)
+    dialog.shape.setCurrentIndex(dialog.shape.findText("G · Barra con ganchos"))  # los ganchos por defecto (90°) chocan
+    assert not ok_enabled(dialog) and "termina en gancho" in dialog.info.text()
+    _choose(dialog, "hook_start", 0)
+    _choose(dialog, "hook_end", 0)
+    assert ok_enabled(dialog)
+    dialog.shape.setCurrentIndex(dialog.shape.findText("L · Bastón L"))
+    assert [name for name in dialog._widgets if name.startswith("coupler")] == ["coupler_start"]  # la pata es el gancho
+
+
 def test_bar_dialog_prefills_existing_group(qapp):
     group = build_project().elements[2].groups[3]  # estribo E1 de V-101
     dialog = BarDialog(None, group=group, used_marks=["A1", "A2", "A3"])
@@ -356,16 +375,30 @@ def test_plan_tab_lists_the_cutting_sequence(window):
     assert table.rowCount() == 1 and "Aún no hay barras" in table.item(0, 0).text()  # sin resultado, mensaje vacío
 
 
-def test_hook_column_is_in_the_tables(window):
-    select_element(window, "C-1", "Nivel 1")
-    headers = [window.bars_table.horizontalHeaderItem(c).text() for c in range(window.bars_table.columnCount())]
-    column = headers.index("Ganchos\n(° · mm)")
-    stirrup_row = next(r for r in range(window.bars_table.rowCount())
-                       if window.bars_table.line_for_row(r) and window.bars_table.line_for_row(r).mark == "E1")
-    assert window.bars_table.item(stirrup_row, column).text().startswith("2 × 135°")
+def test_tables_have_no_diameter_shape_hook_or_remark_columns(window):
+    for table in (window.bars_table, window.project_table):
+        headers = [table.horizontalHeaderItem(c).text().replace("\n", " ") for c in range(table.columnCount())]
+        assert headers[:3] == ["Marca", "Barra", "Esquema"]
+        for removed in ("Ø (mm)", "Forma", "Ganchos (° · mm)", "Observaciones"):
+            assert removed not in headers
+        assert headers[-1] == "Peso total (kg)"
+    # los ganchos siguen en el dibujo (rótulo G) y en el panel de detalle de la barra
     select_element(window, "V-101", "Nivel 1")
     window.bars_table.selectRow(1)  # A2: U con ganchos de 90°
     assert "Ganchos (° · mm)" in window.detail.details.text() and "90°" in window.detail.details.text()
+
+
+def test_row_with_a_code_warning_is_marked_red_with_a_tooltip(window):
+    select_element(window, "V-101", "Nivel 1")
+    element = window.current_element()
+    from core.rebar import get_rebar
+    element.add_group("E9", get_rebar("#3"), Stirrup(220, 420, ext_start=50, ext_end=50), 2)
+    window.refresh()
+    table = window.bars_table
+    row = table.row_of("E9")
+    assert table.item(row, 0).foreground().color().name().lower() == "#c00000"
+    assert "mínimo normativo" in table.item(row, 0).toolTip()
+    assert table.item(table.row_of("E1"), 0).toolTip() == ""
 
 
 def test_bar_dialog_offers_every_template_with_a_thumbnail(qapp):
@@ -458,7 +491,7 @@ def test_other_element_type_and_project_remnant_setting(qapp, window):
 def test_open_catalog_example_from_the_menu(window):
     window.open_catalog()
     assert window.project.name == "Catálogo de formas" and not window.modified
-    assert window.bars_table.rowCount() == 22  # 21 marcas + subtotal
+    assert window.bars_table.rowCount() == 24  # 23 marcas + subtotal
     pictures = [r for r in range(window.bars_table.rowCount()) if window.bars_table.line_for_row(r)]
-    assert all(not window.bars_table.item(r, 3).icon().isNull() for r in pictures)
+    assert all(not window.bars_table.item(r, 2).icon().isNull() for r in pictures)
     assert window.plan_table.rowCount() > 1 and window.act_catalog.text().startswith("Abrir ejemplo")

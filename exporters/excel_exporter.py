@@ -27,6 +27,7 @@ from openpyxl.utils.units import pixels_to_EMU
 from openpyxl.worksheet.properties import PageSetupProperties
 from openpyxl.worksheet.worksheet import Worksheet
 
+from core.coupler import coupler_label, coupler_legend
 from engine.bbs_calculator import BBSResult, ScheduleLine
 from engine.cutting_report import plan_rows, plan_title, stock_comparison
 from exporters.cutting_images import render_pattern_png
@@ -54,16 +55,15 @@ _BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 
 _CENTER = Alignment(horizontal="center", vertical="center", wrap_text=True)
 _LEFT = Alignment(horizontal="left", vertical="center", wrap_text=True)
-_REMARK = Alignment(horizontal="left", vertical="center", wrap_text=True, indent=1)
 _RIGHT = Alignment(horizontal="right", vertical="center")
 
 _FMT_MM = "#,##0"
 _FMT_2 = "#,##0.00"
 _FMT_PCT = "0.0%"
 
-# Esquema de la barra: celda de 160 x 60 px (el PNG se genera al doble para que se vea nítido).
-_IMG_W, _IMG_H = 160, 60
-_IMG_ROW_HEIGHT_PT = 52.0
+# Esquema de la barra: celda de 200 x 75 px (el PNG se genera al doble para que se vea nítido).
+_IMG_W, _IMG_H = 200, 75
+_IMG_ROW_HEIGHT_PT = 62.0
 # Barra comercial del plan de corte: celda de 400 x 30 px.
 _PLAN_W, _PLAN_H = 400, 30
 _PLAN_ROW_HEIGHT_PT = 27.0
@@ -101,12 +101,10 @@ class ExcelExporter:
         dim_labels = result.dimension_labels
         images = self.include_shape_images
         headers = (
-            ["Marca", "Barra", "Ø (mm)"]
+            ["Marca", "Barra"]
             + (["Esquema"] if images else [])
-            + ["Forma"]
             + dim_labels
-            + ["Ganchos (° · mm)", "Long. corte (mm)", "Cant. por elem.", "Total barras", "Peso unit. (kg)",
-               "Long. total (m)", "Peso total (kg)", "Observaciones"]
+            + ["Long. corte (mm)", "Cant. por elem.", "Total barras", "Peso unit. (kg)", "Long. total (m)", "Peso total (kg)"]
         )
         n_cols = len(headers)
         col = {name: i + 1 for i, name in enumerate(headers)}
@@ -146,38 +144,47 @@ class ExcelExporter:
             ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=col["Total barras"])
             _style(ws.cell(row, 1, "TOTAL GENERAL"), _HEADER_FONT, _RIGHT, fill=_HEADER_FILL)
             self._write_totals(ws, row, col, n_cols, result.total_length_m, result.total_weight_kg, header=True)
+            row += 1
+        self._write_warnings(ws, row, n_cols, result)
 
-        widths = {"Marca": 8, "Barra": 8, "Ø (mm)": 8, "Esquema": 25, "Forma": 18, "Ganchos (° · mm)": 17, "Long. corte (mm)": 12, "Cant. por elem.": 10,
-                  "Total barras": 10, "Peso unit. (kg)": 11, "Long. total (m)": 12, "Peso total (kg)": 12,
-                  "Observaciones": 52}
+        widths = {"Marca": 9, "Barra": 9, "Esquema": 31, "Long. corte (mm)": 13, "Cant. por elem.": 11,
+                  "Total barras": 11, "Peso unit. (kg)": 12, "Long. total (m)": 13, "Peso total (kg)": 13}
         for name, c in col.items():
-            ws.column_dimensions[get_column_letter(c)].width = widths.get(name, 9)  # cotas A, B, C…
+            ws.column_dimensions[get_column_letter(c)].width = widths.get(name, 10)  # cotas A, B, C…
 
         ws.freeze_panes = ws.cell(header_row + 1, 1)
         _page_setup(ws, header_row)
 
     def _write_line(self, ws: Worksheet, row: int, line: ScheduleLine, col: dict[str, int], dim_labels: list[str]) -> None:
         dims = line.shape.dimensions()
-        remark = "; ".join(line.notes + tuple(f"⚠ {w}" for w in line.warnings))
         values: list[tuple[str, object, str | None, Alignment]] = [
             ("Marca", line.mark, None, _CENTER),
             ("Barra", line.rebar.designation, None, _CENTER),
-            ("Ø (mm)", line.rebar.diameter_mm, "0.0", _CENTER),
-            ("Forma", line.shape.label, None, _LEFT),
             *[(label, dims.get(label), _FMT_MM, _RIGHT) for label in dim_labels],
-            ("Ganchos (° · mm)", line.hook_text, None, _CENTER),
             ("Long. corte (mm)", line.cut_length_mm, _FMT_MM, _RIGHT),
             ("Cant. por elem.", line.group.quantity, _FMT_MM, _CENTER),
             ("Total barras", line.total_bars, _FMT_MM, _CENTER),
             ("Peso unit. (kg)", line.unit_weight_kg, _FMT_2, _RIGHT),
             ("Long. total (m)", line.total_length_m, _FMT_2, _RIGHT),
             ("Peso total (kg)", line.total_weight_kg, _FMT_2, _RIGHT),
-            ("Observaciones", remark, None, _REMARK),
         ]
         for name, value, fmt, alignment in values:
-            font = _WARNING if name == "Observaciones" and line.warnings else _BODY
+            font = _WARNING if name == "Marca" and line.warnings else _BODY  # la marca con aviso va en rojo
             _style(ws.cell(row, col[name], value), font, alignment, number_format=fmt)
 
+    @staticmethod
+    def _write_warnings(ws: Worksheet, row: int, n_cols: int, result: BBSResult) -> None:
+        """Avisos de norma bajo la planilla (las marcas con aviso van en rojo en la tabla)."""
+        warnings = result.warnings
+        if not warnings:
+            return
+        row += 1
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=n_cols)
+        _style(ws.cell(row, 1, "Avisos"), Font(name=_FONT, size=11, bold=True, color="C00000"), Alignment(vertical="center"))
+        for element, mark, text in warnings:
+            row += 1
+            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=n_cols)
+            _style(ws.cell(row, 1, f"⚠ {element} · marca {mark}: {text}"), _WARNING, _LEFT)
     @staticmethod
     def _add_shape_image(ws: Worksheet, row: int, column: int, line: ScheduleLine) -> None:
         """Inserta el esquema de ``line`` centrado en la celda (fila alta, columna ``Esquema``)."""
@@ -276,9 +283,19 @@ class ExcelExporter:
                 rows.append([c.summary.rebar.designation, c.summary.rebar.grade.name]
                             + [f"{by_length[l].bars} · {by_length[l].waste_pct:.1%}" if l in by_length else "no caben" for l in lengths]
                             + [f"{c.best_mm / 1000:.2f} m" if c.best_mm else "—"])
-            self._table(ws, row, ["Barra", "Grado", *[f"{l / 1000:.2f} m" for l in lengths], "Recomendada"], rows,
-                        ["@"] * (len(lengths) + 3), total=None)
+            row = self._table(ws, row, ["Barra", "Grado", *[f"{l / 1000:.2f} m" for l in lengths], "Recomendada"], rows,
+                              ["@"] * (len(lengths) + 3), total=None)
             n_cols = max(n_cols, len(lengths) + 3)
+
+        # 5. Couplers (solo si alguna barra los lleva)
+        couplers = result.coupler_counts()
+        if couplers:
+            row = self._section(ws, row + 1, f"{5 if comparisons else 4}. Couplers por barra y tipo")
+            self._table(
+                ws, row, ["Barra", "Grado", "Tipo de coupler", "Cantidad"],
+                [[c.rebar.designation, c.rebar.grade.name, coupler_label(c.kind), c.count] for c in couplers],
+                ["@", "@", "@", _FMT_MM], total=["TOTAL", None, None, sum(c.count for c in couplers)],
+            )
 
         ws.column_dimensions["A"].width = 20
         for c in range(2, n_cols + 1):
@@ -382,7 +399,7 @@ class ExcelExporter:
             ("Proyecto:", self.project_name),
             ("Fecha:", issued + (f"    Responsable: {self.author}" if self.author else "")),
             ("Criterios:", f"Cotas exteriores · ganchos y dobleces según ACI 318 / NSR-10 · "
-                           f"barra comercial {result.stock_length_mm / 1000:.2f} m"),
+                           f"barra comercial {result.stock_length_mm / 1000:.2f} m" + coupler_legend(c.kind for c in result.coupler_counts())),
         ]
         for i, (label, text) in enumerate(info, start=2):
             _style(ws.cell(i, 1, label), _BOLD, Alignment(horizontal="left"))

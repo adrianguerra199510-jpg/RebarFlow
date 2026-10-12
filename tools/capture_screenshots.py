@@ -115,6 +115,16 @@ def capture_interface(out: Path) -> None:
     app.processEvents()
     spiral.grab().save(str(out / "ui_dialogo_espiral.png"))
 
+    coupler = BarDialog(window, suggested_mark="R3")
+    coupler.bar.setCurrentIndex(coupler.bar.findData("#8"))
+    coupler.shape.setCurrentIndex(coupler.shape.findText("R · Recta"))
+    coupler._widgets["length"].setValue(3000)
+    coupler._widgets["coupler_start"].setCurrentIndex(coupler._widgets["coupler_start"].findData("short"))
+    coupler._widgets["coupler_end"].setCurrentIndex(coupler._widgets["coupler_end"].findData("long"))
+    coupler.show()
+    app.processEvents()
+    coupler.grab().save(str(out / "ui_dialogo_coupler.png"))
+
     templates = BarDialog(window, suggested_mark="G1")
     templates.show()
     templates.shape.showPopup()
@@ -127,7 +137,7 @@ def capture_interface(out: Path) -> None:
     window.tabs.setCurrentIndex(0)
     window.resize(1700, 1240)
     app.processEvents()
-    window.bars_table.selectRow(14)  # la marca ET1, un estribo triangular
+    window.bars_table.selectRow(window.bars_table.row_of("ET1"))  # un estribo triangular
     app.processEvents()
     window.grab().save(str(out / "ui_catalogo.png"))
 

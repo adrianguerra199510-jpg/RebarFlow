@@ -1,4 +1,6 @@
 import re
+import shutil
+import subprocess
 
 import pytest
 
@@ -55,3 +57,20 @@ def test_many_elements_paginate_and_empty_result_exports(tmp_path):
     assert pages(big) > 3
     empty = PdfExporter().export(BBSCalculator().calculate([]), tmp_path / "empty.pdf")
     assert empty.read_bytes().startswith(b"%PDF")
+
+
+@pytest.mark.skipif(shutil.which("pdftotext") is None, reason="requiere pdftotext (poppler)")
+def test_pdf_text_has_no_removed_columns_and_lists_warnings_and_couplers(result, tmp_path):
+    from core.shape_codes import StraightBar
+
+    element = StructuralElement("C-1", ElementType.COLUMN, "Nivel 2", 2)
+    element.add_group("C1", get_rebar("#5"), StraightBar(3000, coupler_start="short", coupler_end="long"), 4)
+    elements = [result.element_schedules[0].element, element]
+    path = PdfExporter().export(BBSCalculator().calculate(elements), tmp_path / "t.pdf")
+    text = subprocess.run(["pdftotext", "-layout", str(path), "-"], capture_output=True, text=True, check=True).stdout
+    header = next(line for line in text.splitlines() if "Marca" in line and "Barra" in line)
+    for removed in ("Forma", "Ganchos", "Observaciones", "Ø"):
+        assert removed not in header
+    assert "Avisos" in text and "V-101 · marca E2" in text and "mínimo normativo" in text
+    assert "RC = coupler de rosca corta, RL = coupler de rosca larga" in text
+    assert "Couplers por barra y tipo" in text and "Rosca corta (RC)" in text and "Rosca larga (RL)" in text

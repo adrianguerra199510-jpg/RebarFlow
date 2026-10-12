@@ -21,7 +21,7 @@ class DimLabel:
     """Rótulo junto al punto ``at``, desplazado hacia ``side`` (vector unitario).
 
     ``kind``: ``"dim"`` cota de un tramo, ``"hook"`` largo de la extensión de un gancho (se dibuja en
-    otro color) y ``"angle"`` ángulo de un doblez.
+    otro color) y ``"angle"`` ángulo de un doblez (el rótulo de un coupler lo dibuja el propio :class:`Box`).
     """
 
     text: str
@@ -31,12 +31,28 @@ class DimLabel:
 
 
 @dataclass(frozen=True)
+class Box:
+    """Coupler en el extremo de una barra: un rectángulo centrado en ``at`` y orientado hacia ``heading_deg``
+    (el rumbo que sale de la barra), con su rótulo ``text`` (RC / RL) más allá.
+
+    ``kind`` es el tipo (``"short"`` o ``"long"``; el de rosca larga se dibuja más largo). Su tamaño no se da en las
+    unidades del esquema sino en múltiplos del grosor de la barra, así se ve igual en cualquier forma.
+    """
+
+    at: Point
+    heading_deg: float
+    kind: str = "short"
+    text: str = ""
+
+
+@dataclass(frozen=True)
 class Sketch:
-    """Polilíneas de la barra, líneas de cota auxiliares (``guides``, punteadas) y rótulos."""
+    """Polilíneas de la barra, líneas de cota auxiliares (``guides``, punteadas), rectángulos (``boxes``) y rótulos."""
 
     paths: tuple[tuple[Point, ...], ...]
     labels: tuple[DimLabel, ...] = ()
     guides: tuple[tuple[Point, ...], ...] = ()
+    boxes: tuple[Box, ...] = ()
 
 
 def proportional(values: Sequence[float], minimum: float = 0.3) -> list[float]:

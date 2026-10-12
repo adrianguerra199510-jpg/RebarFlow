@@ -28,9 +28,10 @@ Código   Plantilla                                       Familia
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import ClassVar
 
+from core.coupler import COUPLER_CHOICES
 from core.cutlength import CutLength
 from core.geometry import GeometryError
 from core.params import param
@@ -77,13 +78,16 @@ class HookedBar(OpenPolyShape):
     ext_end: float | None = param("Extensión del gancho final", "length", None, optional=True)
     opposite: int = param("Orientación de los ganchos", "choice", 0, choices=SIDE_CHOICES)
     style: str = param("Estilo", "choice", "main", choices=STYLE_CHOICES)
+    coupler_start: str = param("Coupler inicial (solo sin gancho)", "choice", "none", choices=COUPLER_CHOICES)
+    coupler_end: str = param("Coupler final (solo sin gancho)", "choice", "none", choices=COUPLER_CHOICES)
 
     def dimensions(self) -> dict[str, float]:
         return {"A": self.a}
 
     def poly(self) -> OpenPoly:
         return OpenPoly((self.a,), (), _hook(self.hook_start, self.ext_start), _hook(self.hook_end, self.ext_end),
-                        _use(self.style), bool(self.opposite))
+                        _use(self.style), bool(self.opposite), coupler_start=self.coupler_start,
+                        coupler_end=self.coupler_end)
 
 
 @register_shape
@@ -128,12 +132,15 @@ class ZBar(OpenPolyShape):
     b: float = param("B · pata central", default=200.0)
     c: float = param("C · segundo tramo", default=250.0)
     style: str = param("Estilo", "choice", "main", choices=STYLE_CHOICES)
+    coupler_start: str = param("Coupler inicial", "choice", "none", choices=COUPLER_CHOICES)
+    coupler_end: str = param("Coupler final", "choice", "none", choices=COUPLER_CHOICES)
 
     def dimensions(self) -> dict[str, float]:
         return {"A": self.a, "B": self.b, "C": self.c}
 
     def poly(self) -> OpenPoly:
-        return OpenPoly((self.a, self.b, self.c), (90.0, -90.0), use=_use(self.style))
+        return OpenPoly((self.a, self.b, self.c), (90.0, -90.0), use=_use(self.style),
+                        coupler_start=self.coupler_start, coupler_end=self.coupler_end)
 
 
 @register_shape
@@ -153,19 +160,21 @@ class CrankBar(OpenPolyShape):
     c: float = param("C · segundo tramo", default=600.0)
     angle: float = param("Ángulo de los dobleces", "angle", 45.0, minimum=5.0, maximum=85.0)
     style: str = param("Estilo", "choice", "main", choices=STYLE_CHOICES)
+    coupler_start: str = param("Coupler inicial", "choice", "none", choices=COUPLER_CHOICES)
+    coupler_end: str = param("Coupler final", "choice", "none", choices=COUPLER_CHOICES)
 
     def dimensions(self) -> dict[str, float]:
         return {"A": self.a, "B": self.b, "C": self.c}
 
     def poly(self) -> OpenPoly:
-        return OpenPoly((self.a, self.b, self.c), (self.angle, -self.angle), use=_use(self.style))
+        return OpenPoly((self.a, self.b, self.c), (self.angle, -self.angle), use=_use(self.style),
+                        coupler_start=self.coupler_start, coupler_end=self.coupler_end)
 
     def cut_length(self, rebar: Rebar) -> CutLength:
         cut = super().cut_length(rebar)
         half = math.tan(math.radians(self.angle) / 2.0)
         rise = (self.b - rebar.diameter_mm * half) * math.sin(math.radians(self.angle)) + rebar.diameter_mm
-        return CutLength(cut.dimension_sum_mm, cut.bend_adjustment_mm, cut.extension_mm,
-                         cut.notes + (f"Desnivel exterior {rise:.0f} mm",), cut.warnings, cut.hooks)
+        return replace(cut, notes=cut.notes + (f"Desnivel exterior {rise:.0f} mm",))
 
 
 @register_shape
@@ -183,12 +192,15 @@ class OmegaBar(OpenPolyShape):
     d: float = param("D · pata derecha", default=300.0)
     e: float = param("E · ala derecha", default=200.0)
     style: str = param("Estilo", "choice", "main", choices=STYLE_CHOICES)
+    coupler_start: str = param("Coupler inicial", "choice", "none", choices=COUPLER_CHOICES)
+    coupler_end: str = param("Coupler final", "choice", "none", choices=COUPLER_CHOICES)
 
     def dimensions(self) -> dict[str, float]:
         return {"A": self.a, "B": self.b, "C": self.c, "D": self.d, "E": self.e}
 
     def poly(self) -> OpenPoly:
-        return OpenPoly((self.a, self.b, self.c, self.d, self.e), (90.0, -90.0, -90.0, 90.0), use=_use(self.style))
+        return OpenPoly((self.a, self.b, self.c, self.d, self.e), (90.0, -90.0, -90.0, 90.0), use=_use(self.style),
+                        coupler_start=self.coupler_start, coupler_end=self.coupler_end)
 
 
 # ---------------------------------------------------------- polígonos cerrados
@@ -554,6 +566,8 @@ class CustomBar(OpenPolyShape):
     ext_end: float | None = param("Extensión del gancho final", "length", None, optional=True)
     opposite: int = param("Orientación de los ganchos", "choice", 0, choices=SIDE_CHOICES)
     style: str = param("Estilo", "choice", "main", choices=STYLE_CHOICES)
+    coupler_start: str = param("Coupler inicial (solo sin gancho)", "choice", "none", choices=COUPLER_CHOICES)
+    coupler_end: str = param("Coupler final (solo sin gancho)", "choice", "none", choices=COUPLER_CHOICES)
 
     def validate(self) -> None:
         if len(self.angles) != len(self.legs) - 1:
@@ -567,4 +581,5 @@ class CustomBar(OpenPolyShape):
 
     def poly(self) -> OpenPoly:
         return OpenPoly(self.legs, self.angles, _hook(self.hook_start, self.ext_start),
-                        _hook(self.hook_end, self.ext_end), _use(self.style), bool(self.opposite), floor=0.15)
+                        _hook(self.hook_end, self.ext_end), _use(self.style), bool(self.opposite), floor=0.15,
+                        coupler_start=self.coupler_start, coupler_end=self.coupler_end)

@@ -100,3 +100,23 @@ def test_stirrup_with_different_legs_and_ring_and_spiral_hooks_round_trip(tmp_pa
     for original, copy in zip(element.groups, loaded.elements[0].groups):
         assert copy.shape == original.shape
         assert copy.cut_length_mm == original.cut_length_mm
+
+
+def test_couplers_round_trip_and_old_files_without_them_open(tmp_path):
+    from core.element import ElementType, StructuralElement
+    from core.shape_codes import StraightBar
+    from core.shape_templates import ZBar
+
+    element = StructuralElement("C-1", ElementType.COLUMN, "Nivel 1", 2)
+    n5 = get_rebar("#5")
+    element.add_group("A", n5, StraightBar(3000, coupler_start="short", coupler_end="long"), 4)
+    element.add_group("B", n5, ZBar(coupler_end="short"), 2)
+    loaded = load_project(save_project(Project(elements=[element]), tmp_path / "p.rebarflow"))
+    for original, copy in zip(element.groups, loaded.elements[0].groups):
+        assert copy.shape == original.shape and copy.cut.couplers == original.cut.couplers
+    data = project_to_dict(Project(elements=[element]))
+    for group in data["elements"][0]["groups"]:  # un archivo anterior a los couplers no tiene esos campos
+        for key in ("coupler_start", "coupler_end"):
+            group["shape"]["dimensions"].pop(key, None)
+    old = project_from_dict(data)
+    assert all(g.cut.couplers == () for g in old.elements[0].groups)

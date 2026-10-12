@@ -91,6 +91,7 @@ class BarDetailPanel(QFrame):
             _row("Ajuste por dobleces", f"{cut.bend_adjustment_mm:+,.1f} mm"),
             _row("Ganchos (° · mm)", line.hook_text or "—"),
             _row("Extensiones de gancho", f"{cut.extension_mm:,.1f} mm"),
+            *([_row("Couplers", escape(line.coupler_text))] if cut.couplers else []),
             _row("Longitud de corte", f"{cut.total_mm:,.1f} → {line.cut_length_mm:,.0f} mm"),
             _row("Peso unitario", f"{line.unit_weight_kg:,.2f} kg"),
             _row("Barras", f"{line.group.quantity} × {line.element.quantity} elem. = {line.total_bars}"),

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from core.coupler import coupler_text
+
 
 @dataclass(frozen=True)
 class HookInfo:
@@ -36,10 +38,16 @@ class CutLength:
     notes: tuple[str, ...] = ()  # información para el doblador (diámetro de mandril, etc.)
     warnings: tuple[str, ...] = ()  # incumplimientos no fatales de la norma
     hooks: tuple[HookInfo, ...] = ()  # ganchos de la barra, con el largo de cada uno
+    couplers: tuple[str, ...] = ()  # tipo de coupler de cada extremo que lo lleva (inicio y final, en ese orden)
 
     @property
     def total_mm(self) -> float:
         return self.dimension_sum_mm + self.bend_adjustment_mm + self.extension_mm
+
+    @property
+    def coupler_text(self) -> str:
+        """Couplers de la barra en texto: ``"2 × rosca corta"`` (vacío si no lleva)."""
+        return coupler_text(self.couplers)
 
     @property
     def hook_text(self) -> str:

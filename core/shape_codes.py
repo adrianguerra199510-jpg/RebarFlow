@@ -34,6 +34,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, fields, replace
 from typing import ClassVar, TypeVar
 
+from core.coupler import COUPLER_CHOICES  # noqa: F401 (se reexporta)
 from core.cutlength import CutLength, HookInfo  # noqa: F401 (se reexportan)
 from core.geometry import GeometryError  # noqa: F401
 from core.params import DEFAULT_LENGTH_MM, ParamSpec, param, validate_param  # noqa: F401
@@ -228,17 +229,19 @@ class StraightBar(OpenPolyShape):
 
     code: ClassVar[str] = "R"
     name: ClassVar[str] = "Recta"
-    description: ClassVar[str] = "Barra recta sin dobleces."
+    description: ClassVar[str] = "Barra recta sin dobleces; admite un coupler (rosca corta o larga) en cada extremo."
 
     field_labels: ClassVar[dict[str, str]] = {"length": "A · longitud total"}
 
     length: float
+    coupler_start: str = param("Coupler inicial", "choice", "none", choices=COUPLER_CHOICES)
+    coupler_end: str = param("Coupler final", "choice", "none", choices=COUPLER_CHOICES)
 
     def dimensions(self) -> dict[str, float]:
         return {"A": self.length}
 
     def poly(self) -> OpenPoly:
-        return OpenPoly((self.length,))
+        return OpenPoly((self.length,), coupler_start=self.coupler_start, coupler_end=self.coupler_end)
 
 
 @register_shape
@@ -248,12 +251,13 @@ class LBar(OpenPolyShape):
 
     code: ClassVar[str] = "L"
     name: ClassVar[str] = "Bastón L"
-    description: ClassVar[str] = "Un doblez a 90°; la pata corta actúa de gancho."
+    description: ClassVar[str] = "Un doblez a 90°; la pata corta actúa de gancho. El otro extremo admite coupler."
 
     field_labels: ClassVar[dict[str, str]] = {"a": "A · tramo principal", "b": "B · tramo del gancho"}
 
     a: float
     b: float
+    coupler_start: str = param("Coupler en el extremo de A", "choice", "none", choices=COUPLER_CHOICES)
 
     @classmethod
     def with_standard_hook(cls, rebar: Rebar, a: float) -> LBar:
@@ -264,7 +268,7 @@ class LBar(OpenPolyShape):
         return {"A": self.a, "B": self.b}
 
     def poly(self) -> OpenPoly:
-        return OpenPoly((self.a, self.b), (90.0,), end_hooks=(False, True))
+        return OpenPoly((self.a, self.b), (90.0,), end_hooks=(False, True), coupler_start=self.coupler_start)
 
 
 @register_shape

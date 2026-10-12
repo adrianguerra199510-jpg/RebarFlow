@@ -96,7 +96,7 @@ trapezoidal (cota C, que no es un lado) se acota con una línea punteada.
 Hay **un solo estribo rectangular** (`E`): cada pata se configura por separado con *Gancho inicial* y *Gancho final* (90° o 135°) y
 su extensión (vacía = estándar de la norma), de modo que sirve para el estribo sísmico a 135°, el de 90° y el mixto de 135°/90°.
 Los estribos en U, triangular y trapezoidal tienen los mismos cuatro parámetros. Con extensiones distintas el dibujo rotula
-ambas (`G 75 / 120`) y la columna *Ganchos* las separa (`135° · 75 / 90° · 120`).
+ambas (`G 75 / 120`, en el orden de la barra); el panel de detalle y el diálogo las detallan (`135° · 75 / 90° · 120`).
 
 El **aro circular** admite traslape (`B`, 0 si no hay) y un gancho de 90° o 135° en cada extremo, doblado hacia el interior:
 `L = π·(D − d) + traslape + Σ (φ·R + extensión)`. La **espiral** admite vueltas planas adicionales al inicio y al final por
@@ -110,8 +110,23 @@ separado (ACI 318 pide 1.5 en cada extremo) y los mismos ganchos. Un archivo gua
 ### Largo de los ganchos
 
 Cada gancho se anota con su **extensión recta** (la «pata» después del doblez): en el dibujo, como un rótulo ámbar
-`G 75`; en las tablas, en la columna **Ganchos (° · mm)** (`2 × 135° · 75`, `90° · 152 / 180° · 65`); y en el panel de detalle.
-Si la extensión queda bajo el mínimo de la norma, aparece un aviso en rojo. Con una extensión vacía se usa la estándar.
+`G 75`; y en el diálogo de la barra y el panel de detalle, como **Ganchos (° · mm)** (`2 × 135° · 75`, `90° · 152 / 180° · 65`).
+Las tablas de la planilla no llevan columna de ganchos: el dibujo ya los rotula. Si la extensión queda bajo el mínimo de la norma,
+la marca sale en **rojo** (con el aviso en su ayuda emergente) y Excel y PDF listan el texto en un bloque *Avisos* bajo la
+planilla. Con una extensión vacía se usa la estándar.
+
+### Couplers (rosca corta y rosca larga)
+
+Las barras que no terminan en gancho admiten un **coupler** en cada extremo libre (recta, bastón L por el extremo de A, barra con
+ganchos con el extremo en «Sin gancho», Z, quiebre, omega y forma personalizada). Se dibuja un **rectángulo** sobre el extremo
+con su rótulo (`RC` = rosca corta, el rectángulo más corto; `RL` = rosca larga, el más largo) y se elige el tipo en *Coupler
+inicial* / *Coupler final*. Un extremo con gancho (incluida la pata de una L o de una U) no admite coupler: el diálogo lo avisa.
+
+El coupler es un accesorio: **no cambia la longitud de corte** (las cotas llegan al extremo de la barra y la rosca se labra
+sobre esa longitud). Se cuenta por barra y tipo en la hoja *Resumen* (Excel, PDF e interfaz), y el encabezado de la planilla
+explica `RC`/`RL`. Si su proveedor pide un sobrante por rosca o por forja del extremo, súmelo a la cota del tramo.
+
+![Coupler](docs/ui_dialogo_coupler.png)
 
 ### Forma dibujada a mano
 
@@ -173,7 +188,10 @@ comercial (6, 9 y 12 m) y se recomienda la que menos acero compra.
 ## Exportación con esquemas
 
 Cada fila lleva el dibujo de su forma con las cotas, igual que las tablas de armaduras de Revit o de los programas de
-despiece. El mismo renderizador (`exporters/shape_images.py`) alimenta Excel, PDF y la interfaz.
+despiece. El mismo renderizador (`exporters/shape_images.py`) alimenta Excel, PDF y la interfaz. Las columnas de la planilla son
+*Marca, Barra, Esquema, cotas (A, B, C…), longitud de corte, cantidad por elemento, total de barras, peso unitario, longitud total y
+peso total*; el diámetro, el nombre de la forma, los ganchos y las observaciones no van en la tabla (están en el dibujo, el diálogo
+y el panel de detalle).
 
 | Excel (`.xlsx`) | PDF |
 |---|---|
@@ -193,7 +211,8 @@ despiece. El mismo renderizador (`exporters/shape_images.py`) alimenta Excel, PD
 core/
   geometry.py       GeometryError y fórmulas de doblez (tangente, arco, deducción)
   rebar.py          Rebar, SteelGrade, ganchos estándar, radios de doblez y catálogo #3–#11 y #14
-  cutlength.py      CutLength (desglose del cálculo) y HookInfo (largo de cada gancho)
+  cutlength.py      CutLength (desglose del cálculo), HookInfo (largo de cada gancho) y couplers de la barra
+  coupler.py        tipos de coupler (rosca corta / larga), rótulos y leyendas
   params.py         parámetros de una forma (tipo, límites, opciones): validación y formularios
   polybar.py        motor: polilínea abierta con ganchos y polígono cerrado con ganchos (longitud y esquema)
   sketch.py         esquemas independientes del medio de dibujo (trazos, rótulos con su letra, líneas de cota)
@@ -277,7 +296,7 @@ Para un estribo poligonal cerrado se hereda de `ClosedPolyShape`; para geometrí
 * Los estribos se modelan con ambos ganchos en una misma esquina y tangentes a ella; la diferencia con un
   detalle real (ganchos anidados) es de pocos milímetros. En el aro los ganchos nacen del punto de cierre y de la punta del traslape.
 * El dibujo de la espiral es una elevación esquemática: las vueltas adicionales se ven como anillos planos y los ganchos como patas
-  sobre los extremos; el detalle exacto está en la columna *Ganchos* y en el cálculo.
+  sobre los extremos; el detalle exacto está en el diálogo y en el panel de detalle.
 * Los esquemas son proporcionales a las cotas con un tramo mínimo, para que un gancho corto siga legible.
 * El plan de corte usa barras comerciales de una sola longitud por diámetro; la comparación de 6, 9 y 12 m ayuda a elegirla, pero
   no mezcla longitudes en una misma compra.

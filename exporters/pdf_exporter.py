@@ -20,6 +20,7 @@ from reportlab.pdfgen import canvas
 from reportlab.platypus import (Image, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table,
                                 TableStyle)
 
+from core.coupler import coupler_label, coupler_legend
 from engine.bbs_calculator import BBSResult, ElementSchedule, ScheduleLine
 from engine.cutting_report import plan_rows, plan_title, stock_comparison
 from exporters.cutting_images import render_pattern_png
@@ -33,7 +34,7 @@ _RED = "#C00000"
 
 _PAGE_SIZES = {"letter": LETTER, "a4": A4}
 _MARGIN = 28
-_IMG_W, _IMG_H = 120, 45  # puntos; proporción 8:3 igual que el PNG
+_IMG_W, _IMG_H = 152, 57  # puntos; proporción 8:3 igual que el PNG
 _PLAN_W, _PLAN_H = 256, 22  # barra comercial del plan de corte (puntos)
 
 _BASE = ParagraphStyle("base", fontName="Helvetica", fontSize=7.5, leading=9)
@@ -131,6 +132,10 @@ class PdfExporter:
             story += [Spacer(1, 8), KeepTogether([table]) if height < 0.92 * frame_height else table]
         if result.element_schedules:
             story += [Spacer(1, 6), self._grand_total(result, usable)]
+        if result.warnings:  # las marcas con aviso van en rojo en la tabla; el texto se lista aquí
+            story += [Paragraph("Avisos", ParagraphStyle("warn_title", parent=_SECTION, textColor=colors.HexColor(_RED)))]
+            story += [Paragraph(f'<font color="{_RED}">⚠ {escape(element)} · marca {escape(mark)}: {escape(text)}</font>', _BASE)
+                      for element, mark, text in result.warnings]
         story += [PageBreak(), *self._summary(result, usable), PageBreak(), *self._cutting_plan(result, usable)]
 
         footer = f"{self.project_name}  ·  {issued}"
@@ -145,7 +150,8 @@ class PdfExporter:
             [_p("Fecha:", _INFO_LABEL), _p(issued + (f"    Responsable: {self.author}" if self.author else ""), _INFO_TEXT)],
             [_p("Criterios:", _INFO_LABEL),
              _p("Cotas exteriores · ganchos y dobleces según ACI 318 / NSR-10 · "
-                f"barra comercial {result.stock_length_mm / 1000:.2f} m", _INFO_TEXT)],
+                f"barra comercial {result.stock_length_mm / 1000:.2f} m"
+                + coupler_legend(c.kind for c in result.coupler_counts()), _INFO_TEXT)],
         ]
         table = Table(info, colWidths=[52, usable - 52])
         table.setStyle(TableStyle([("LINEBELOW", (0, 0), (-1, -1), 0.4, _GRID), ("TOPPADDING", (0, 0), (-1, -1), 2),
@@ -154,20 +160,17 @@ class PdfExporter:
 
     # ------------------------------------------------------------ tabla por elemento
     def _columns(self, dim_labels: list[str], usable: float) -> list[tuple[str, float]]:
-        columns = [("Marca", 34), ("Barra", 32), ("Ø (mm)", 32)]
+        columns = [("Marca", 38), ("Barra", 34)]
         if self.include_shape_images:
             columns.append(("Esquema", _IMG_W + 10))
-        columns.append(("Forma", 62))
-        columns += [(label, 32) for label in dim_labels]
-        columns += [("Ganchos (° · mm)", 58), ("Long. corte (mm)", 46), ("Cant. por elem.", 36), ("Total barras", 38), ("Peso unit. (kg)", 42),
-                    ("Long. total (m)", 46), ("Peso total (kg)", 48)]
-        fixed = sum(width for _, width in columns)
-        observations = max(usable - fixed, 84)
-        columns.append(("Observaciones", observations))
-        total = fixed + observations
+        columns += [(label, 36) for label in dim_labels]
+        columns += [("Long. corte (mm)", 50), ("Cant. por elem.", 40), ("Total barras", 42), ("Peso unit. (kg)", 46),
+                    ("Long. total (m)", 50), ("Peso total (kg)", 52)]
         picture = _IMG_W + 10 if self.include_shape_images else 0
-        # muchas cotas: se comprimen todas las columnas menos la del esquema, que debe seguir conteniendo su imagen
-        scale = (usable - picture) / (total - picture) if total > usable else 1.0
+        rest = sum(width for name, width in columns if name != "Esquema")
+        # las demás columnas se ajustan al ancho útil (hasta un 60 % más anchas); con muchas cotas se comprimen, pero la
+        # del esquema no, que debe seguir conteniendo su imagen
+        scale = min((usable - picture) / rest, 1.6)
         return [(name, width if name == "Esquema" else width * scale) for name, width in columns]
 
     def _element_table(self, schedule: ElementSchedule, dim_labels: list[str], usable: float) -> Table:
@@ -204,22 +207,17 @@ class PdfExporter:
 
     def _line_row(self, line: ScheduleLine, names: list[str], dim_labels: list[str]) -> list:
         dims = line.shape.dimensions()
-        remark = "<br/>".join(
-            [escape(note) for note in line.notes] + [f'<font color="{_RED}">AVISO: {escape(w)}</font>' for w in line.warnings]
-        )
+        mark_style = ParagraphStyle("mark_warn", parent=_CELL_CENTER, textColor=colors.HexColor(_RED), fontName="Helvetica-Bold") \
+            if line.warnings else _CELL_CENTER
         cells: dict[str, object] = {
-            "Marca": _p(line.mark, _CELL_CENTER),
+            "Marca": _p(line.mark, mark_style),
             "Barra": _p(line.rebar.designation, _CELL_CENTER),
-            "Ø (mm)": _p(f"{line.rebar.diameter_mm:.1f}", _CELL_CENTER),
-            "Forma": _p(line.shape.label),
-            "Ganchos (° · mm)": _p(line.hook_text, _CELL_CENTER),
             "Long. corte (mm)": _p(_n(line.cut_length_mm, 0), _CELL_RIGHT),
             "Cant. por elem.": _p(line.group.quantity, _CELL_CENTER),
             "Total barras": _p(line.total_bars, _CELL_CENTER),
             "Peso unit. (kg)": _p(_n(line.unit_weight_kg), _CELL_RIGHT),
             "Long. total (m)": _p(_n(line.total_length_m), _CELL_RIGHT),
             "Peso total (kg)": _p(_n(line.total_weight_kg), _CELL_RIGHT),
-            "Observaciones": Paragraph(remark, ParagraphStyle("remark", parent=_BASE, fontSize=6.5, leading=8)),
         }
         for label in dim_labels:
             cells[label] = _p(_n(dims[label], 0), _CELL_RIGHT) if label in dims else ""
@@ -294,6 +292,13 @@ class PdfExporter:
                             + [f"{c.best_mm / 1000:.2f} m" if c.best_mm else "—"])
             story += [Paragraph("4. Longitud comercial recomendada (barras · sobrante, con el plan optimizado de cada una)", _SECTION),
                       self._data_table(["Barra", "Grado", *[f"{l / 1000:.2f} m" for l in lengths], "Recomendada"], rows, None, usable)]
+
+        couplers = result.coupler_counts()
+        if couplers:
+            story += [Paragraph(f"{5 if comparisons else 4}. Couplers por barra y tipo", _SECTION), self._data_table(
+                ["Barra", "Grado", "Tipo de coupler", "Cantidad"],
+                [[c.rebar.designation, c.rebar.grade.name, coupler_label(c.kind), _n(c.count, 0)] for c in couplers],
+                ["TOTAL", "", "", _n(sum(c.count for c in couplers), 0)], usable)]
         return story
 
     # --------------------------------------------------------------- plan de corte

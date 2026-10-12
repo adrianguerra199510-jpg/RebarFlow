@@ -26,10 +26,11 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from core.coupler import COUPLER_CODES, COUPLER_NAMES, COUPLER_NONE
 from core.cutlength import CutLength, HookInfo
 from core.geometry import GeometryError
 from core.rebar import BendUse, HookType, Rebar
-from core.sketch import DimLabel, Point, Sketch, dimension_text, format_dimension, proportional
+from core.sketch import Box, DimLabel, Point, Sketch, dimension_text, format_dimension, proportional
 
 _EPS = 1e-6
 LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -52,6 +53,8 @@ class OpenPoly:
     ganchos (p. ej. la pata de una L o de una U) aunque no sean un gancho normativo explícito.
     ``names`` es la referencia de planilla de cada tramo (``"A"``, ``"B"``…) tal como se rotula en el
     esquema; por defecto, las letras en orden. Un nombre repetido, o vacío, no se rotula.
+    ``coupler_start`` y ``coupler_end`` (``"none"``, ``"short"`` o ``"long"``) ponen un coupler en ese extremo,
+    siempre que no termine en gancho; no cambian la longitud de corte.
     """
 
     legs: tuple[float, ...]
@@ -64,6 +67,8 @@ class OpenPoly:
     floor: float = 0.3  # tramo mínimo relativo en el esquema, para que un tramo corto siga legible
     start_heading: float = 0.0  # rumbo del primer tramo en el esquema (0° = hacia la derecha)
     names: tuple[str, ...] | None = None
+    coupler_start: str = COUPLER_NONE
+    coupler_end: str = COUPLER_NONE
 
 
 @dataclass(frozen=True)
@@ -135,6 +140,26 @@ def resolve_hook(rebar: Rebar, use: BendUse, hook: HookSpec) -> tuple[HookInfo, 
     return HookInfo(angle, extension, standard), warnings
 
 
+def _check_couplers(code: str, poly: OpenPoly) -> tuple[str, ...]:
+    """Tipo de coupler de cada extremo que lo lleva; un extremo con gancho no admite coupler."""
+    found: list[str] = []
+    for slot, (kind, hook, tail, name) in enumerate((
+        (poly.coupler_start, poly.hook_start, poly.end_hooks[0] and bool(poly.angles), "inicial"),
+        (poly.coupler_end, poly.hook_end, poly.end_hooks[1] and bool(poly.angles), "final"),
+    )):
+        if kind == COUPLER_NONE:
+            continue
+        if kind not in COUPLER_NAMES:
+            raise GeometryError(f"Forma {code}: tipo de coupler desconocido {kind!r}.")
+        if hook is not None or tail:
+            raise GeometryError(
+                f"Forma {code}: el extremo {name} termina en gancho y no admite coupler "
+                "(elija «Sin gancho» en ese extremo o quite el coupler)."
+            )
+        found.append(kind)
+    return tuple(found)
+
+
 @dataclass(frozen=True)
 class OpenResult:
     """Resultado del análisis de una polilínea abierta."""
@@ -191,6 +216,7 @@ def analyse_open(code: str, poly: OpenPoly, rebar: Rebar) -> OpenResult:
         standard_90 = rebar.standard_hook(HookType.DEG_90, poly.use).extension_mm
     except GeometryError:
         standard_90 = None
+    couplers = _check_couplers(code, poly)
     hooks = [h for h in resolved if h is not None]
     first_tail = last_tail = None
     if poly.end_hooks[0] and angles:
@@ -212,6 +238,7 @@ def analyse_open(code: str, poly: OpenPoly, rebar: Rebar) -> OpenResult:
         notes=(" · ".join(notes),),
         warnings=tuple(warnings),
         hooks=tuple(hooks),
+        couplers=couplers,
     )
     return OpenResult(cut, tuple(straights), resolved[0], resolved[1], first_tail, last_tail)
 
@@ -379,7 +406,11 @@ def open_polyline_sketch(code: str, poly: OpenPoly, rebar: Rebar | None) -> Sket
             labels += _hook_label(result.first_tail, points[0], (points[0][0] - points[1][0], points[0][1] - points[1][1]))
         if result.last_tail is not None:
             labels += _hook_label(result.last_tail, points[-1], (points[-1][0] - points[-2][0], points[-1][1] - points[-2][1]))
-    return Sketch(paths=(tuple(path),), labels=tuple(labels))
+    boxes = tuple(Box(end, outward, kind, COUPLER_CODES[kind])
+                  for kind, end, outward in ((poly.coupler_start, points[0], headings[0] + 180.0),
+                                             (poly.coupler_end, points[-1], headings[-1]))
+                  if kind in COUPLER_CODES)
+    return Sketch(paths=(tuple(path),), labels=tuple(labels), boxes=boxes)
 
 
 def closed_polygon_sketch(code: str, poly: ClosedPoly, rebar: Rebar | None) -> Sketch:

@@ -69,6 +69,8 @@ def build_catalog_project() -> Project:
     rows = [
         ("R1", n5, StraightBar(3000), 4, "Recta"),
         ("R2", n14, StraightBar(3000), 4, "Recta #14"),
+        ("R3", n5, StraightBar(3000, coupler_start="short", coupler_end="long"), 8,
+         "Recta con coupler de rosca corta (inicio) y de rosca larga (final)"),
         ("L1", n5, LBar.with_standard_hook(n5, a=1200), 4, "Bastón L con gancho estándar de 90°"),
         ("L2", n14, LBar.with_standard_hook(n14, a=1500), 2, "Bastón L #14 con gancho estándar de 90°"),
         ("U1", n5, UBar.with_standard_hooks(n5, a=1650), 4, "Gancho U con patas de 90°"),
@@ -80,6 +82,7 @@ def build_catalog_project() -> Project:
          "Estribo rectangular, pata inicial a 135° y final a 90° con extensión de 120 mm"),
         ("EU1", n3, UStirrup(a=300, b=400), 12, "Estribo abierto en U, patas a 135°"),
         ("Z1", n5, ZBar(a=250, b=200, c=250), 8, "Barra en Z"),
+        ("Z2", n5, ZBar(a=250, b=200, c=250, coupler_end="short"), 8, "Barra en Z con coupler de rosca corta en un extremo"),
         ("Q1", n4, CrankBar(a=900, b=350, c=900, angle=45), 10, "Quiebre a 45°"),
         ("O1", n3, OmegaBar(a=200, b=300, c=400, d=300, e=200), 10, "Omega"),
         ("ET1", n3, TriStirrup(a=300, b=300, c=300), 10, "Estribo triangular"),
