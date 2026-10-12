@@ -14,15 +14,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from io import BytesIO
 from pathlib import Path
 
 from openpyxl import Workbook
+from openpyxl.drawing.image import Image as XLImage
+from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
+from openpyxl.drawing.xdr import XDRPositiveSize2D
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.utils.units import pixels_to_EMU
 from openpyxl.worksheet.properties import PageSetupProperties
 from openpyxl.worksheet.worksheet import Worksheet
 
 from engine.bbs_calculator import BBSResult, ScheduleLine
+from exporters.shape_images import render_shape_png
 
 _FONT = "Calibri"
 _NAVY = "1F3864"
@@ -53,6 +59,10 @@ _FMT_MM = "#,##0"
 _FMT_2 = "#,##0.00"
 _FMT_PCT = "0.0%"
 
+# Esquema de la barra: celda de 160 x 60 px (el PNG se genera al doble para que se vea nítido).
+_IMG_W, _IMG_H = 160, 60
+_IMG_ROW_HEIGHT_PT = 52.0
+
 
 @dataclass
 class ExcelExporter:
@@ -62,11 +72,13 @@ class ExcelExporter:
         project_name: Nombre del proyecto que se muestra en el encabezado.
         author: Responsable del cálculo (opcional).
         issue_date: Fecha de emisión; por defecto, hoy.
+        include_shape_images: Inserta el dibujo de cada forma en la planilla.
     """
 
     project_name: str = "Proyecto"
     author: str = ""
     issue_date: date | None = None
+    include_shape_images: bool = True
 
     def export(self, result: BBSResult, path: str | Path) -> Path:
         path = Path(path)
@@ -80,9 +92,12 @@ class ExcelExporter:
     # ------------------------------------------------------------ hoja 1: planilla
     def _write_schedule(self, ws: Worksheet, result: BBSResult) -> None:
         ws.title = "Planilla BBS"
-        dim_labels = _dimension_labels(result.lines)
+        dim_labels = result.dimension_labels
+        images = self.include_shape_images
         headers = (
-            ["Marca", "Barra", "Ø (mm)", "Forma"]
+            ["Marca", "Barra", "Ø (mm)"]
+            + (["Esquema"] if images else [])
+            + ["Forma"]
             + dim_labels
             + ["Long. corte (mm)", "Cant. por elem.", "Total barras", "Peso unit. (kg)",
                "Long. total (m)", "Peso total (kg)", "Observaciones"]
@@ -110,6 +125,8 @@ class ExcelExporter:
             first_line = row
             for line in schedule.lines:
                 self._write_line(ws, row, line, col, dim_labels)
+                if images:
+                    self._add_shape_image(ws, row, col["Esquema"], line)
                 row += 1
             if schedule.lines:
                 ws.row_dimensions.group(first_line, row - 1, outline_level=1, hidden=False)
@@ -124,7 +141,7 @@ class ExcelExporter:
             _style(ws.cell(row, 1, "TOTAL GENERAL"), _HEADER_FONT, _RIGHT, fill=_HEADER_FILL)
             self._write_totals(ws, row, col, n_cols, result.total_length_m, result.total_weight_kg, header=True)
 
-        widths = {"Marca": 8, "Barra": 8, "Ø (mm)": 8, "Forma": 18, "Long. corte (mm)": 12, "Cant. por elem.": 10,
+        widths = {"Marca": 8, "Barra": 8, "Ø (mm)": 8, "Esquema": 25, "Forma": 18, "Long. corte (mm)": 12, "Cant. por elem.": 10,
                   "Total barras": 10, "Peso unit. (kg)": 11, "Long. total (m)": 12, "Peso total (kg)": 12,
                   "Observaciones": 52}
         for name, c in col.items():
@@ -153,6 +170,19 @@ class ExcelExporter:
         for name, value, fmt, alignment in values:
             font = _WARNING if name == "Observaciones" and line.warnings else _BODY
             _style(ws.cell(row, col[name], value), font, alignment, number_format=fmt)
+
+    @staticmethod
+    def _add_shape_image(ws: Worksheet, row: int, column: int, line: ScheduleLine) -> None:
+        """Inserta el esquema de ``line`` centrado en la celda (fila alta, columna ``Esquema``)."""
+        ws.row_dimensions[row].height = _IMG_ROW_HEIGHT_PT
+        image = XLImage(BytesIO(render_shape_png(line.shape, 2 * _IMG_W, 2 * _IMG_H)))
+        row_px = _IMG_ROW_HEIGHT_PT * 96 / 72
+        image.anchor = OneCellAnchor(
+            _from=AnchorMarker(col=column - 1, colOff=pixels_to_EMU(4), row=row - 1,
+                               rowOff=pixels_to_EMU(max(0, (row_px - _IMG_H) / 2))),
+            ext=XDRPositiveSize2D(pixels_to_EMU(_IMG_W), pixels_to_EMU(_IMG_H)),
+        )
+        ws.add_image(image)
 
     @staticmethod
     def _write_totals(ws: Worksheet, row: int, col: dict[str, int], n_cols: int,
@@ -281,12 +311,6 @@ def _style(cell, font: Font, alignment: Alignment, *, fill: PatternFill | None =
     if number_format is not None:
         cell.number_format = number_format
     return cell
-
-
-def _dimension_labels(lines: tuple[ScheduleLine, ...]) -> list[str]:
-    """Rótulos de cotas usados por las formas presentes, en orden alfabético (A, B, C…)."""
-    labels = {label for line in lines for label in line.shape.dimensions()}
-    return sorted(labels, key=lambda s: (len(s), s)) or ["A"]
 
 
 def _page_setup(ws: Worksheet, header_row: int | None) -> None:

@@ -33,7 +33,7 @@ def test_workbook_structure_and_totals(result, tmp_path):
 
     ws = wb["Planilla BBS"]
     headers = [c.value for c in ws[7]]
-    assert headers[:4] == ["Marca", "Barra", "Ø (mm)", "Forma"]
+    assert headers[:5] == ["Marca", "Barra", "Ø (mm)", "Esquema", "Forma"]
     assert {"A", "B", "C"} <= set(headers)
     weight_col = headers.index("Peso total (kg)") + 1
 
@@ -74,3 +74,16 @@ def test_summary_sheet(result, tmp_path):
 def test_empty_result_exports(tmp_path):
     path = ExcelExporter().export(BBSCalculator().calculate([]), tmp_path / "empty.xlsx")
     assert load_workbook(path).sheetnames == ["Planilla BBS", "Resumen"]
+
+
+def test_shape_images_are_embedded_one_per_line(result, tmp_path):
+    ws = load_workbook(ExcelExporter().export(result, tmp_path / "bbs.xlsx"))["Planilla BBS"]
+    assert len(ws._images) == len(result.lines)
+    assert all(img.anchor._from.col == 3 for img in ws._images)  # columna "Esquema"
+
+
+def test_images_can_be_disabled(result, tmp_path):
+    path = ExcelExporter(include_shape_images=False).export(result, tmp_path / "plain.xlsx")
+    ws = load_workbook(path)["Planilla BBS"]
+    assert ws._images == []
+    assert "Esquema" not in [c.value for c in ws[7]]

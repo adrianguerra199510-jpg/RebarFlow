@@ -143,6 +143,11 @@ class BBSResult:
         return self.total_waste_weight_kg / purchased if purchased else 0.0
 
     @property
+    def dimension_labels(self) -> list[str]:
+        """Rótulos de cota presentes en las formas usadas ("A", "B", "C"…), ordenados."""
+        return dimension_labels(self.lines)
+
+    @property
     def levels(self) -> tuple[str, ...]:
         """Niveles en orden de aparición."""
         return tuple(dict.fromkeys(schedule.element.level for schedule in self.element_schedules))
@@ -154,6 +159,12 @@ class BBSResult:
             row = table[line.level]
             row[line.rebar] = row.get(line.rebar, 0.0) + line.total_weight_kg
         return table
+
+
+def dimension_labels(lines: Iterable[ScheduleLine]) -> list[str]:
+    """Rótulos de cota ("A", "B"…) usados por las formas de ``lines``, en orden alfabético."""
+    labels = {label for line in lines for label in line.shape.dimensions()}
+    return sorted(labels, key=lambda s: (len(s), s)) or ["A"]
 
 
 def round_up_to_step(value: float, step: float) -> float:

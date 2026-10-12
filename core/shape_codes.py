@@ -33,6 +33,7 @@ from typing import ClassVar, TypeVar
 
 from core.geometry import GeometryError, bend_deduction, outside_tangent_length
 from core.rebar import BendUse, HookType, Rebar
+from core.sketch import DimLabel, Sketch, format_dimension, proportional
 
 _EPS = 1e-6
 
@@ -62,6 +63,8 @@ class ShapeCode(ABC):
 
     code: ClassVar[str]
     name: ClassVar[str]
+    #: Rótulo de cada campo para formularios (p. ej. ``{"a": "A · tramo principal"}``).
+    field_labels: ClassVar[dict[str, str]] = {}
 
     def __post_init__(self) -> None:
         for f in fields(self):
@@ -84,6 +87,11 @@ class ShapeCode(ABC):
     @abstractmethod
     def cut_length(self, rebar: Rebar) -> CutLength:
         """Longitud de corte para ``rebar``. Lanza :class:`GeometryError` si la forma es imposible."""
+
+    def sketch(self) -> Sketch:
+        """Esquema de la forma para planillas e interfaz. Por defecto, una línea con las cotas rotuladas."""
+        text = "  ".join(f"{label}={format_dimension(value)}" for label, value in self.dimensions().items())
+        return Sketch(paths=(((0.0, 0.0), (1.0, 0.0)),), labels=(DimLabel(text, (0.5, 0.0), (0.0, 1.0)),))
 
 
 # ------------------------------------------------------------------- registro
@@ -133,10 +141,18 @@ class StraightBar(ShapeCode):
     code: ClassVar[str] = "R"
     name: ClassVar[str] = "Recta"
 
+    field_labels: ClassVar[dict[str, str]] = {"length": "A · longitud total"}
+
     length: float
 
     def dimensions(self) -> dict[str, float]:
         return {"A": self.length}
+
+    def sketch(self) -> Sketch:
+        return Sketch(
+            paths=(((0.0, 0.0), (1.0, 0.0)),),
+            labels=(DimLabel(format_dimension(self.length), (0.5, 0.0), (0.0, 1.0)),),
+        )
 
     def cut_length(self, rebar: Rebar) -> CutLength:
         return CutLength(dimension_sum_mm=self.length)
@@ -150,6 +166,8 @@ class LBar(ShapeCode):
     code: ClassVar[str] = "L"
     name: ClassVar[str] = "Bastón L"
 
+    field_labels: ClassVar[dict[str, str]] = {"a": "A · tramo principal", "b": "B · tramo del gancho"}
+
     a: float
     b: float
 
@@ -160,6 +178,16 @@ class LBar(ShapeCode):
 
     def dimensions(self) -> dict[str, float]:
         return {"A": self.a, "B": self.b}
+
+    def sketch(self) -> Sketch:
+        ra, rb = proportional([self.a, self.b])
+        return Sketch(
+            paths=(((0.0, 0.0), (ra, 0.0), (ra, rb)),),
+            labels=(
+                DimLabel(format_dimension(self.a), (ra / 2, 0.0), (0.0, -1.0)),
+                DimLabel(format_dimension(self.b), (ra, rb / 2), (1.0, 0.0)),
+            ),
+        )
 
     def cut_length(self, rebar: Rebar) -> CutLength:
         d = rebar.diameter_mm
@@ -186,6 +214,8 @@ class UBar(ShapeCode):
     code: ClassVar[str] = "U"
     name: ClassVar[str] = "Gancho U"
 
+    field_labels: ClassVar[dict[str, str]] = {"a": "A · base", "b": "B · pata izquierda", "c": "C · pata derecha"}
+
     a: float
     b: float
     c: float
@@ -198,6 +228,17 @@ class UBar(ShapeCode):
 
     def dimensions(self) -> dict[str, float]:
         return {"A": self.a, "B": self.b, "C": self.c}
+
+    def sketch(self) -> Sketch:
+        ra, rb, rc = proportional([self.a, self.b, self.c])
+        return Sketch(
+            paths=(((0.0, rb), (0.0, 0.0), (ra, 0.0), (ra, rc)),),
+            labels=(
+                DimLabel(format_dimension(self.a), (ra / 2, 0.0), (0.0, -1.0)),
+                DimLabel(format_dimension(self.b), (0.0, rb / 2), (-1.0, 0.0)),
+                DimLabel(format_dimension(self.c), (ra, rc / 2), (1.0, 0.0)),
+            ),
+        )
 
     def cut_length(self, rebar: Rebar) -> CutLength:
         d = rebar.diameter_mm
@@ -237,12 +278,31 @@ class Stirrup135(ShapeCode):
     code: ClassVar[str] = "E"
     name: ClassVar[str] = "Estribo 135°"
 
+    field_labels: ClassVar[dict[str, str]] = {
+        "a": "A · ancho exterior",
+        "b": "B · alto exterior",
+        "hook_extension_mm": "Extensión del gancho",
+    }
+
     a: float
     b: float
     hook_extension_mm: float | None = None
 
     def dimensions(self) -> dict[str, float]:
         return {"A": self.a, "B": self.b}
+
+    def sketch(self) -> Sketch:
+        w, h = proportional([self.a, self.b], 0.4)
+        tail, gap = 0.2 * min(w, h), 0.12 * min(w, h)
+        # Ambos ganchos parten de la esquina superior izquierda y entran al núcleo a 45°.
+        path = ((tail, h - tail), (0.0, h), (0.0, 0.0), (w, 0.0), (w, h), (gap, h), (gap + tail, h - tail))
+        return Sketch(
+            paths=(path,),
+            labels=(
+                DimLabel(format_dimension(self.a), (w / 2, 0.0), (0.0, -1.0)),
+                DimLabel(format_dimension(self.b), (w, h / 2), (1.0, 0.0)),
+            ),
+        )
 
     def cut_length(self, rebar: Rebar) -> CutLength:
         d = rebar.diameter_mm

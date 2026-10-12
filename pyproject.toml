@@ -4,18 +4,22 @@ version = "0.1.0"
 description = "Generación automática de planillas de despiece de acero de refuerzo (Bar Bending Schedule)."
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["openpyxl>=3.1"]
+dependencies = ["openpyxl>=3.1", "pillow>=10.1", "reportlab>=4.0"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+gui = ["PySide6>=6.5"]
+dev = ["pytest>=7", "PySide6>=6.5"]
+
+[project.gui-scripts]
+rebarflow = "gui.app:run"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["core", "engine", "exporters"]
-py-modules = ["main"]
+packages = ["core", "engine", "exporters", "gui"]
+py-modules = ["main", "sample_project"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
