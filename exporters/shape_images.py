@@ -23,11 +23,16 @@ TEXT_COLOR = (70, 70, 70, 255)
 _SUPERSAMPLE = 4
 
 
-def render_sketch(sketch: Sketch, width: int, height: int) -> Image.Image:
-    """Dibuja ``sketch`` en una imagen RGBA transparente de ``width`` x ``height`` píxeles."""
+def render_sketch(sketch: Sketch, width: int, height: int, *, bar_color: tuple[int, ...] = BAR_COLOR,
+                  text_color: tuple[int, ...] = TEXT_COLOR, ref_height: int | None = None) -> Image.Image:
+    """Dibuja ``sketch`` en una imagen RGBA transparente de ``width`` x ``height`` píxeles.
+
+    ``ref_height`` fija la altura de referencia que escala el texto y el trazo; por defecto la altura
+    de la imagen con un tope de 150 px, para que los dibujos grandes no engrosen sin límite.
+    """
     ss = _SUPERSAMPLE
     w, h = width * ss, height * ss
-    ref = min(height, 150) * ss  # los dibujos grandes no agrandan sin límite el texto ni el trazo
+    ref = (ref_height or min(height, 150)) * ss
     font_px = max(8 * ss, round(ref * 0.21))
     font = ImageFont.load_default(size=font_px)
     line_w = max(3 * ss, round(ref * 0.05))
@@ -66,9 +71,9 @@ def render_sketch(sketch: Sketch, width: int, height: int) -> Image.Image:
 
     for path in sketch.paths:
         pixels = [to_px(p) for p in path]
-        draw.line(pixels, fill=BAR_COLOR, width=line_w, joint="curve")
+        draw.line(pixels, fill=bar_color, width=line_w, joint="curve")
         for x, y in (pixels[0], pixels[-1]):  # extremos redondeados
-            draw.ellipse((x - line_w / 2, y - line_w / 2, x + line_w / 2, y + line_w / 2), fill=BAR_COLOR)
+            draw.ellipse((x - line_w / 2, y - line_w / 2, x + line_w / 2, y + line_w / 2), fill=bar_color)
 
     for label in sketch.labels:
         x, y = to_px(label.at)
@@ -77,7 +82,7 @@ def render_sketch(sketch: Sketch, width: int, height: int) -> Image.Image:
             anchor, pos = ("mb", (x, y - gap)) if sy > 0 else ("mt", (x, y + gap))
         else:
             anchor, pos = ("lm", (x + gap, y)) if sx > 0 else ("rm", (x - gap, y))
-        draw.text(pos, label.text, fill=TEXT_COLOR, font=font, anchor=anchor)
+        draw.text(pos, label.text, fill=text_color, font=font, anchor=anchor)
 
     return image.resize((width, height), Image.LANCZOS)
 

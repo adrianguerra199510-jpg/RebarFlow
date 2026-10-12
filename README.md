@@ -9,7 +9,7 @@ cada barra.
 ## Uso rápido
 
 ```bash
-pip install -e ".[dev]"      # openpyxl, pillow, reportlab, PySide6 y pytest
+pip install -e ".[dev]"      # openpyxl, pillow, reportlab, PySide6 y pytest (solo la app: ".[gui]")
 python -m gui                # interfaz gráfica (también: rebarflow, o rebarflow ruta/proyecto.rebarflow)
 python main.py               # ejemplo por consola: escribe output/planilla_bbs.xlsx y .pdf
 pytest
@@ -35,6 +35,22 @@ resultado = BBSCalculator(stock_length_mm=12_000).calculate([viga])
 ExcelExporter(project_name="Mi proyecto").export(resultado, "planilla.xlsx")
 PdfExporter(project_name="Mi proyecto", page_size="a4").export(resultado, "planilla.pdf")
 ```
+
+## Ejecutable de Windows (.exe)
+
+`RebarFlow-Windows.zip` contiene `RebarFlow\RebarFlow.exe` (aplicación gráfica de 64 bits, sin instalar Python ni
+dependencias): descomprima **toda** la carpeta y abra el `.exe`. Requiere Windows 10 (1809+) o Windows 11. Al no estar
+firmado, SmartScreen puede avisar: «Más información» → «Ejecutar de todas formas».
+
+Para reconstruirlo:
+
+* **En Windows**: `packaging\build_windows.bat` (crea un entorno virtual, instala dependencias, genera el icono y
+  ejecuta PyInstaller con `packaging/rebarflow.spec`); deja `dist\RebarFlow-Windows.zip`.
+* **En GitHub**: ejecute el workflow *Build Windows executable* (pestaña Actions → Run workflow); corre las pruebas,
+  compila, ejecuta `RebarFlow.exe --self-test` y publica el `.zip` como artefacto.
+
+`RebarFlow.exe --self-test CARPETA` abre la ventana con el proyecto de ejemplo, exporta Excel, PDF y proyecto, guarda una
+captura y escribe `self-test.txt` con el resultado; sirve para comprobar un `.exe` recién compilado.
 
 ## Interfaz gráfica
 
@@ -93,6 +109,8 @@ exporters/
 gui/                interfaz PySide6: ventana principal, diálogos, tablas, estilo
 sample_project.py   proyecto de ejemplo (cimentación + 2 niveles)
 main.py             ejemplo por consola
+packaging/          lanzador, .spec de PyInstaller, icono, build_windows.bat y LEEME del .exe
+.github/workflows/  build-windows.yml: compila el .exe en GitHub Actions
 tools/              capture_screenshots.py regenera las imágenes de docs/
 tests/              pytest (la interfaz se prueba sin pantalla)
 ```

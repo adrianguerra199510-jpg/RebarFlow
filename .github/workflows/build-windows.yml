@@ -1,0 +1,35 @@
+name: Build Windows executable
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -e ".[gui]" pyinstaller pytest
+      - name: Run tests
+        run: python -m pytest -q
+        env:
+          QT_QPA_PLATFORM: offscreen
+      - name: Build executable
+        run: |
+          python packaging/make_icon.py
+          pyinstaller --noconfirm --clean packaging/rebarflow.spec
+      - name: Self-test the executable
+        run: dist/RebarFlow/RebarFlow.exe --self-test self-test-output
+      - name: Package
+        run: |
+          Copy-Item packaging/LEEME.txt dist/RebarFlow/LEEME.txt
+          Compress-Archive -Path dist/RebarFlow -DestinationPath dist/RebarFlow-Windows.zip -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RebarFlow-Windows
+          path: dist/RebarFlow-Windows.zip

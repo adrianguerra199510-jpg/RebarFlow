@@ -7,6 +7,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
+from gui.icon import app_icon
 from gui.main_window import MainWindow
 from gui.style import STYLE
 
@@ -16,6 +17,7 @@ def create_application(argv: list[str] | None = None) -> QApplication:
     app.setStyle("Fusion")
     app.setStyleSheet(STYLE)
     app.setApplicationName("RebarFlow")
+    app.setWindowIcon(app_icon())
     return app
 
 

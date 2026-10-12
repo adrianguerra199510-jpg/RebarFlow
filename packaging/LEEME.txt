@@ -1,0 +1,21 @@
+RebarFlow - Planillas de despiece de acero de refuerzo (BBS)
+============================================================
+
+COMO USARLO
+1. Descomprima TODA la carpeta (no ejecute el .exe desde dentro del .zip).
+2. Abra RebarFlow\RebarFlow.exe con doble clic. No requiere instalar Python ni nada mas.
+3. Menu Archivo > "Abrir ejemplo" carga un proyecto de muestra.
+4. Exporte la planilla con los botones "Exportar a Excel" y "Exportar a PDF".
+
+REQUISITOS
+Windows 10 (version 1809 o superior) o Windows 11, de 64 bits.
+
+AVISO DE WINDOWS SMARTSCREEN
+El ejecutable no esta firmado digitalmente, por lo que Windows puede mostrar
+"Windows protegio su PC". Pulse "Mas informacion" y luego "Ejecutar de todas formas".
+
+NORMAS
+Los ganchos y diametros de doblez siguen ACI 318 / NSR-10. Verifiquelos contra la
+edicion de la norma vigente en su proyecto antes de emitir planos o pedidos.
+
+Los proyectos se guardan como archivos .rebarflow (texto JSON).

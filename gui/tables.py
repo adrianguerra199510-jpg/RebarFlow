@@ -110,9 +110,9 @@ class ScheduleTable(QTableWidget):
             self._fill_totals(row, col, length, weight, _NAVY, QColor("white"))
             self.setRowHeight(row, 28)
 
-        widths = {"Marca": 56, "Barra": 52, "Ø (mm)": 56, "Esquema": IMG_W + 16, "Forma": 50, "Cant. por elem.": 66,
-                  "Total barras": 62, "Long. corte (mm)": 88, "Peso unit. (kg)": 80, "Long. total (m)": 84,
-                  "Peso total (kg)": 84}
+        widths = {"Marca": 60, "Barra": 54, "Ø (mm)": 66, "Esquema": IMG_W + 16, "Forma": 58, "Cant. por elem.": 76,
+                  "Total barras": 66, "Long. corte (mm)": 92, "Peso unit. (kg)": 84, "Long. total (m)": 88,
+                  "Peso total (kg)": 88}
         for name, index in col.items():
             self.setColumnWidth(index, widths.get(name, 58))  # cotas A, B, C: 58
         header = self.horizontalHeader()
