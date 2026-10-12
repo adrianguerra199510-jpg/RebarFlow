@@ -11,7 +11,9 @@ from core.element import ElementType  # noqa: E402
 from core.rebar import get_rebar  # noqa: E402
 from core.shape_codes import Stirrup135  # noqa: E402
 from gui.app import create_application  # noqa: E402
-from gui.dialogs import BarDialog, ElementDialog, ProjectDialog  # noqa: E402
+from engine.cutting_report import plan_rows  # noqa: E402
+from gui.dialogs import BarDialog, ElementDialog, LegsEditor, ProjectDialog  # noqa: E402
+from core.shape_templates import CustomBar, HookedBar  # noqa: E402
 from gui.main_window import MainWindow  # noqa: E402
 from sample_project import build_project  # noqa: E402
 
@@ -85,8 +87,8 @@ def test_add_element_and_bars_updates_totals_and_marks_modified(window):
 
     dialog = BarDialog(window, suggested_mark="E1", used_marks=[])
     dialog.shape.setCurrentIndex(dialog.shape.findText("E · Estribo 135°"))
-    dialog._spins["a"].setValue(320)
-    dialog._spins["b"].setValue(320)
+    dialog._widgets["a"].setValue(320)
+    dialog._widgets["b"].setValue(320)
     dialog.quantity.setValue(10)
     dialog.bar.setCurrentIndex(dialog.bar.findData("#3"))
     assert ok_enabled(dialog)
@@ -179,11 +181,11 @@ def test_bar_dialog_rejects_impossible_geometry_and_recovers(qapp):
     dialog = BarDialog(None, suggested_mark="B1")
     dialog.shape.setCurrentIndex(dialog.shape.findText("L · Bastón L"))
     dialog.bar.setCurrentIndex(dialog.bar.findData("#8"))
-    dialog._spins["a"].setValue(60)
+    dialog._widgets["a"].setValue(60)
     assert not ok_enabled(dialog) and "mínimo geométrico" in dialog.info.text()
     with pytest.raises(ValueError):
         dialog.result_group()
-    dialog._spins["a"].setValue(1000)
+    dialog._widgets["a"].setValue(1000)
     assert ok_enabled(dialog) and "Longitud de corte" in dialog.info.text()
     assert dialog.result_group().shape.a == 1000
 
@@ -197,21 +199,21 @@ def test_bar_dialog_mark_and_stock_validation(qapp):
     assert not ok_enabled(dialog)
     dialog.mark.setText("A2")
     dialog.shape.setCurrentIndex(dialog.shape.findText("R · Recta"))
-    dialog._spins["length"].setValue(13000)
+    dialog._widgets["length"].setValue(13000)
     assert not ok_enabled(dialog) and "excede la barra comercial" in dialog.info.text()
 
 
 def test_bar_dialog_builds_fields_from_shape_and_keeps_values(qapp):
     dialog = BarDialog(None)
     dialog.shape.setCurrentIndex(dialog.shape.findText("U · Gancho U"))
-    assert list(dialog._spins) == ["a", "b", "c"]
-    dialog._spins["a"].setValue(1234)
+    assert list(dialog._widgets) == ["a", "b", "c"]
+    dialog._widgets["a"].setValue(1234)
     dialog.shape.setCurrentIndex(dialog.shape.findText("E · Estribo 135°"))
-    assert list(dialog._spins) == ["a", "b", "hook_extension_mm"]
-    assert dialog._spins["a"].value() == 1234  # se conserva el valor del campo de igual nombre
-    assert dialog._spins["hook_extension_mm"].value() == 0  # "estándar"
+    assert list(dialog._widgets) == ["a", "b", "hook_extension_mm"]
+    assert dialog._widgets["a"].value() == 1234  # se conserva el valor del campo de igual nombre
+    assert dialog._widgets["hook_extension_mm"].value() == 0  # "estándar"
     assert dialog.result_group().shape.hook_extension_mm is None
-    dialog._spins["hook_extension_mm"].setValue(50)
+    dialog._widgets["hook_extension_mm"].setValue(50)
     assert "75" in dialog.info.text() and "Aviso" in dialog.info.text()  # gancho por debajo del mínimo
     assert dialog.result_group().shape == Stirrup135(1234, 500, 50)
 
@@ -221,7 +223,7 @@ def test_bar_dialog_prefills_existing_group(qapp):
     dialog = BarDialog(None, group=group, used_marks=["A1", "A2", "A3"])
     assert dialog.mark.text() == "E1" and dialog.bar.currentData() == "#3"
     assert dialog.shape.currentData() is Stirrup135
-    assert dialog._spins["a"].value() == 220 and dialog._spins["b"].value() == 420
+    assert dialog._widgets["a"].value() == 220 and dialog._widgets["b"].value() == 420
     assert dialog.quantity.value() == 38 and ok_enabled(dialog)
     assert dialog.result_group().shape == group.shape
 
@@ -289,3 +291,123 @@ def test_delete_slots_ask_for_confirmation(window, monkeypatch):
     assert len(element.groups) == 3
     window.delete_element()
     assert all(e.name != "V-101" or e.level != "Nivel 1" for e in window.project.elements)
+
+
+# ------------------------------------------------------------------ plan de corte, ganchos, plantillas
+def test_plan_tab_lists_the_cutting_sequence(window):
+    assert window.tabs.tabText(3) == "Plan de corte"
+    table = window.plan_table
+    picture_rows = [r for r in range(table.rowCount()) if table.item(r, 3) is not None and not table.item(r, 3).icon().isNull()]
+    assert len(picture_rows) == sum(len(plan_rows(s)) for s in window.result.diameter_summaries)
+    assert any("plan lineal" in (table.item(r, 0).text() if table.item(r, 0) else "") for r in range(table.rowCount()))
+    window.project.stock_length_mm = 3000
+    window.refresh()
+    assert table.rowCount() == 1 and "Aún no hay barras" in table.item(0, 0).text()  # sin resultado, mensaje vacío
+
+
+def test_hook_column_is_in_the_tables(window):
+    select_element(window, "C-1", "Nivel 1")
+    headers = [window.bars_table.horizontalHeaderItem(c).text() for c in range(window.bars_table.columnCount())]
+    column = headers.index("Ganchos\n(° · mm)")
+    stirrup_row = next(r for r in range(window.bars_table.rowCount())
+                       if window.bars_table.line_for_row(r) and window.bars_table.line_for_row(r).mark == "E1")
+    assert window.bars_table.item(stirrup_row, column).text().startswith("2 × 135°")
+    select_element(window, "V-101", "Nivel 1")
+    window.bars_table.selectRow(1)  # A2: U con ganchos de 90°
+    assert "Ganchos (° · mm)" in window.detail.details.text() and "90°" in window.detail.details.text()
+
+
+def test_bar_dialog_offers_every_template_with_a_thumbnail(qapp):
+    dialog = BarDialog(None, suggested_mark="T")
+    classes = [dialog.shape.itemData(i) for i in range(dialog.shape.count())]
+    assert {"R", "L", "U", "E", "E90", "G", "EU", "Z", "Q", "O", "ET", "ETR", "AR", "ES", "X"} <= {c.code for c in classes}
+    for index, cls in enumerate(classes):
+        assert not dialog.shape.itemIcon(index).isNull(), cls.code
+        dialog.shape.setCurrentIndex(index)
+        assert dialog.shape_hint.text() == cls.description
+        assert ok_enabled(dialog), f"la plantilla {cls.code} debe ser válida con sus valores por defecto"
+        assert dialog.result_group().shape == cls.template()
+
+
+def test_hooked_bar_dialog_validates_hooks_and_style(qapp):
+    dialog = BarDialog(None, suggested_mark="G1")
+    dialog.shape.setCurrentIndex(dialog.shape.findText("G · Barra con ganchos"))
+    start = dialog._widgets["hook_start"]
+    start.setCurrentIndex(start.findData(135))
+    assert not ok_enabled(dialog) and "no hay gancho estándar de 135°" in dialog.info.text()
+    style = dialog._widgets["style"]
+    style.setCurrentIndex(style.findData("stirrup"))
+    assert ok_enabled(dialog) and "Ganchos (° · mm)" in dialog.info.text()
+    assert dialog.result_group().shape.hook_start == 135 and dialog.result_group().cut.hooks[0].extension_mm == 75.0
+    dialog._widgets["ext_start"].setValue(50)  # bajo el mínimo de la norma: aviso, no error
+    assert ok_enabled(dialog) and "Aviso" in dialog.info.text()
+
+
+def test_legs_editor_operations(qapp):
+    editor = LegsEditor((300.0, 200.0, 300.0), (90.0, -90.0))
+    assert editor.values() == ((300.0, 200.0, 300.0), (90.0, -90.0))
+    editor.add_leg()
+    assert editor.values() == ((300.0, 200.0, 300.0, 300.0), (90.0, -90.0, 90.0))
+    editor.reverse()
+    assert editor.values() == ((300.0, 300.0, 200.0, 300.0), (-90.0, 90.0, -90.0))
+    editor.mirror()
+    assert editor.values()[1] == (90.0, -90.0, 90.0)
+    editor.table.selectRow(1)
+    editor.remove_leg()  # desaparece el tramo 2 y el giro con que salía de él
+    assert editor.values() == ((300.0, 200.0, 300.0), (90.0, 90.0))
+    editor.table.setCurrentCell(-1, -1)
+    editor.remove_leg()  # sin selección quita el último tramo
+    assert editor.values() == ((300.0, 200.0), (90.0,))
+    editor.remove_leg()
+    editor.remove_leg()
+    assert len(editor.values()[0]) == 1 and editor.values()[1] == ()  # siempre queda al menos un tramo
+
+
+def test_custom_shape_through_the_dialog(qapp):
+    dialog = BarDialog(None, suggested_mark="X1")
+    dialog.shape.setCurrentIndex(dialog.shape.findText("X · Personalizada"))
+    assert dialog._editor is not None
+    dialog._editor.set_values((400.0, 300.0, 200.0), (90.0, -45.0))
+    hook = dialog._widgets["hook_end"]
+    hook.setCurrentIndex(hook.findData(90))
+    assert ok_enabled(dialog)
+    shape = dialog.result_group().shape
+    assert shape == CustomBar(legs=(400.0, 300.0, 200.0), angles=(90.0, -45.0), hook_end=90)
+    dialog._editor.set_values((400.0, 300.0), (200.0,))  # un giro de 200° es imposible
+    assert not ok_enabled(dialog)
+
+
+def test_dialog_prefills_existing_hooked_and_custom_shapes(qapp):
+    for original in (HookedBar(1200, 135, 100, 90, None, 1, "stirrup"),
+                     CustomBar(legs=(300.0, 200.0, 300.0), angles=(90.0, -90.0), hook_start=90)):
+        group = build_project().elements[2].groups[0].__class__("P1", get_rebar("#4"), original, 2)
+        dialog = BarDialog(None, group=group)
+        assert dialog.shape.currentData() is type(original)
+        assert ok_enabled(dialog) and dialog.result_group().shape == original
+
+
+def test_other_element_type_and_project_remnant_setting(qapp, window):
+    dialog = ElementDialog(None, levels=["Nivel 1"])
+    dialog.name.setText("MURETE-1")
+    dialog.type.setCurrentIndex(dialog.type.findData(ElementType.OTHER))
+    assert dialog.type.currentText() == "Otros" and dialog.values()[1] is ElementType.OTHER
+    element = window.add_element_values(*dialog.values())
+    assert element.element_type is ElementType.OTHER and window.current_element() is element
+    assert "Otros" in window.tree.currentItem().text(0)  # el árbol muestra «MURETE-1 · Otros ×1»
+    assert window.result is not None  # el cálculo y las tablas funcionan con el tipo nuevo
+
+    project = build_project()
+    pdialog = ProjectDialog(None, project)
+    assert pdialog.reusable.value() == 1000
+    pdialog.reusable.setValue(2500)
+    pdialog.apply_to(project)
+    assert project.reusable_remnant_mm == 2500
+
+
+def test_open_catalog_example_from_the_menu(window):
+    window.open_catalog()
+    assert window.project.name == "Catálogo de formas" and not window.modified
+    assert window.bars_table.rowCount() == 17  # 16 marcas + subtotal
+    pictures = [r for r in range(window.bars_table.rowCount()) if window.bars_table.line_for_row(r)]
+    assert all(not window.bars_table.item(r, 3).icon().isNull() for r in pictures)
+    assert window.plan_table.rowCount() > 1 and window.act_catalog.text().startswith("Abrir ejemplo")

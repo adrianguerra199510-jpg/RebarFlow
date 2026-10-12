@@ -17,6 +17,7 @@ class ElementType(str, Enum):
     FOOTING = "Zapata"
     SLAB = "Losa"
     WALL = "Muro"
+    OTHER = "Otros"
 
 
 @dataclass(frozen=True)

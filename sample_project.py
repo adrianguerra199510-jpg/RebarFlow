@@ -5,7 +5,10 @@ from __future__ import annotations
 from core.element import ElementType, StructuralElement
 from core.project import Project
 from core.rebar import get_rebar
-from core.shape_codes import LBar, Stirrup135, StraightBar, UBar
+from core.shape_codes import LBar, Stirrup90, Stirrup135, StraightBar, UBar
+from core.shape_templates import (
+    CrankBar, CustomBar, HookedBar, OmegaBar, RingTie, Spiral, TrapStirrup, TriStirrup, UStirrup, ZBar,
+)
 
 COVER_MM = 40.0  # recubrimiento libre al estribo
 
@@ -57,3 +60,31 @@ def build_elements() -> list[StructuralElement]:
 
 def build_project() -> Project:
     return Project(name="Edificio de ejemplo", author="RebarFlow", elements=build_elements())
+
+
+def build_catalog_project() -> Project:
+    """Una barra de cada plantilla del catálogo de formas (en un elemento de tipo «Otros»), para ver y probar todas."""
+    n3, n4, n5 = get_rebar("#3"), get_rebar("#4"), get_rebar("#5")
+    element = StructuralElement("Catálogo", ElementType.OTHER, "Ejemplos", 1)
+    rows = [
+        ("R1", n5, StraightBar(3000), 4, "Recta"),
+        ("L1", n5, LBar.with_standard_hook(n5, a=1200), 4, "Bastón L con gancho estándar de 90°"),
+        ("U1", n5, UBar.with_standard_hooks(n5, a=1650), 4, "Gancho U con patas de 90°"),
+        ("G1", n4, HookedBar(a=1800, hook_start=90, hook_end=180), 6, "Ganchos de 90° y 180°"),
+        ("G2", n3, HookedBar(a=320, hook_start=135, hook_end=90, style="stirrup"), 20, "Traba: gancho de 135° y de 90°"),
+        ("E1", n3, Stirrup135(320, 320), 24, "Estribo rectangular, ganchos a 135°"),
+        ("E2", n3, Stirrup90(220, 420), 24, "Estribo rectangular, ganchos a 90°"),
+        ("EU1", n3, UStirrup(a=300, b=400, hook=135), 12, "Estribo abierto en U, ganchos a 135°"),
+        ("Z1", n5, ZBar(a=250, b=200, c=250), 8, "Barra en Z"),
+        ("Q1", n4, CrankBar(a=900, b=350, c=900, angle=45), 10, "Quiebre a 45°"),
+        ("O1", n3, OmegaBar(a=200, b=300, c=400, d=300, e=200), 10, "Omega"),
+        ("ET1", n3, TriStirrup(a=300, b=300, c=300, hook=135), 10, "Estribo triangular"),
+        ("ETR1", n3, TrapStirrup(bottom=400, top=250, height=300, hook=135), 10, "Estribo trapezoidal"),
+        ("AR1", n3, RingTie(diameter=400, lap=250), 20, "Aro circular con traslape"),
+        ("ES1", n3, Spiral(diameter=400, pitch=75, height=2400), 2, "Espiral (se suministra en rollo)"),
+        ("X1", n4, CustomBar(legs=(300.0, 200.0, 300.0, 250.0), angles=(90.0, -90.0, 60.0), hook_end=90), 6,
+         "Forma dibujada a mano: 4 tramos, giros de 90°, −90° y 60° y gancho final de 90°"),
+    ]
+    for mark, rebar, shape, quantity, description in rows:
+        element.add_group(mark, rebar, shape, quantity, description)
+    return Project(name="Catálogo de formas", author="RebarFlow", elements=[element])

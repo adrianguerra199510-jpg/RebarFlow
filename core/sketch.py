@@ -18,11 +18,16 @@ Point = tuple[float, float]
 
 @dataclass(frozen=True)
 class DimLabel:
-    """Rótulo de cota: ``text`` junto al punto ``at``, desplazado hacia ``side`` (vector unitario)."""
+    """Rótulo junto al punto ``at``, desplazado hacia ``side`` (vector unitario).
+
+    ``kind``: ``"dim"`` cota de un tramo, ``"hook"`` largo de la extensión de un gancho (se dibuja en
+    otro color) y ``"angle"`` ángulo de un doblez.
+    """
 
     text: str
     at: Point
     side: Point = (0.0, 1.0)
+    kind: str = "dim"
 
 
 @dataclass(frozen=True)

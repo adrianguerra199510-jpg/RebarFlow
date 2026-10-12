@@ -19,9 +19,9 @@ from engine.bbs_calculator import BBSCalculator, BBSResult, ScheduleLine, dimens
 from exporters.excel_exporter import ExcelExporter
 from exporters.pdf_exporter import PdfExporter
 from gui.dialogs import BarDialog, ElementDialog, ProjectDialog
-from gui.tables import ScheduleTable, SummaryView
+from gui.tables import CuttingPlanTable, ScheduleTable, SummaryView
 from gui.widgets import BarDetailPanel
-from sample_project import build_project
+from sample_project import build_catalog_project, build_project
 
 _PROJECT_FILTER = f"Proyecto RebarFlow (*{FILE_SUFFIX})"
 
@@ -80,11 +80,13 @@ class MainWindow(QMainWindow):
         self.project_table = ScheduleTable(grouped=True)
         self.project_table.itemSelectionChanged.connect(self._on_project_row_selection)
         self.summary = SummaryView()
+        self.plan_table = CuttingPlanTable()
 
         self.tabs = QTabWidget()
         self.tabs.addTab(element_tab, "Barras del elemento")
         self.tabs.addTab(self.project_table, "Planilla del proyecto")
         self.tabs.addTab(self.summary, "Resumen")
+        self.tabs.addTab(self.plan_table, "Plan de corte")
 
         center = QWidget()
         center_layout = QVBoxLayout(center)
@@ -127,6 +129,8 @@ class MainWindow(QMainWindow):
                                      shortcut=QKeySequence.StandardKey.Open)
         self.act_sample = self._action("Abrir ejemplo", self.open_sample, icon=sp.SP_DirHomeIcon,
                                        tip="Carga un proyecto de ejemplo (cimentación y 2 niveles)")
+        self.act_catalog = self._action("Abrir ejemplo: catálogo de formas", self.open_catalog,
+                                        tip="Carga un proyecto con una barra de cada plantilla de forma")
         self.act_save = self._action("Guardar", self.save_project_file, icon=sp.SP_DialogSaveButton,
                                      shortcut=QKeySequence.StandardKey.Save)
         self.act_save_as = self._action("Guardar como…", self.save_project_as, shortcut=QKeySequence.StandardKey.SaveAs)
@@ -160,7 +164,7 @@ class MainWindow(QMainWindow):
 
         menu = self.menuBar()
         file_menu = menu.addMenu("&Archivo")
-        for action in (self.act_new, self.act_open, self.act_sample, None, self.act_save, self.act_save_as, None,
+        for action in (self.act_new, self.act_open, self.act_sample, self.act_catalog, None, self.act_save, self.act_save_as, None,
                        self.act_props, None, self.act_excel, self.act_pdf, None, self.act_quit):
             file_menu.addSeparator() if action is None else file_menu.addAction(action)
         element_menu = menu.addMenu("&Elemento")
@@ -191,7 +195,8 @@ class MainWindow(QMainWindow):
         """Recalcula la planilla y reconstruye el árbol y las tablas conservando la selección."""
         target = select or self._element
         try:
-            self.result = BBSCalculator(self.project.stock_length_mm, self.project.length_rounding_mm).calculate(
+            self.result = BBSCalculator(self.project.stock_length_mm, self.project.length_rounding_mm,
+                          self.project.reusable_remnant_mm).calculate(
                 self.project.elements)
             self.error = None
         except ValueError as exc:  # p. ej. una barra mayor que la comercial
@@ -241,6 +246,7 @@ class MainWindow(QMainWindow):
         schedule = self._element_schedule()
         self.bars_table.populate([schedule] if schedule else [], dimension_labels(schedule.lines) if schedule else ["A"])
         self.summary.populate(self.result)
+        self.plan_table.populate(self.result)
         if select_mark is not None and (row := self.bars_table.row_of(select_mark)) is not None:
             self.bars_table.selectRow(row)
         self._on_bar_selection()
@@ -446,6 +452,10 @@ class MainWindow(QMainWindow):
     def open_sample(self) -> None:
         if self._confirm_discard():
             self.set_project(build_project())
+
+    def open_catalog(self) -> None:
+        if self._confirm_discard():
+            self.set_project(build_catalog_project())
 
     def open_path(self, path: Path) -> bool:
         try:

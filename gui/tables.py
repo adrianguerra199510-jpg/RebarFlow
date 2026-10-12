@@ -11,7 +11,8 @@ from PySide6.QtWidgets import (
 )
 
 from engine.bbs_calculator import BBSResult, ElementSchedule, ScheduleLine
-from gui.widgets import shape_pixmap
+from engine.cutting_report import plan_rows, plan_title, stock_comparison
+from gui.widgets import pattern_pixmap, shape_pixmap
 
 IMG_W, IMG_H = 160, 60
 _BAND = QColor("#D9E1F2")
@@ -49,7 +50,7 @@ class ScheduleTable(QTableWidget):
     FIXED = ["Marca", "Barra", "Ø (mm)", "Esquema", "Forma"]
     TAIL = ["Cant. por elem.", "Total barras", "Long. corte (mm)", "Peso unit. (kg)", "Long. total (m)",
             "Peso total (kg)", "Observaciones"]
-    _HEADER_BREAKS = {"Cant. por elem.": "Cant.\npor elem.", "Total barras": "Total\nbarras",
+    _HEADER_BREAKS = {"Ganchos (° · mm)": "Ganchos\n(° · mm)", "Cant. por elem.": "Cant.\npor elem.", "Total barras": "Total\nbarras",
                       "Long. corte (mm)": "Long. corte\n(mm)", "Peso unit. (kg)": "Peso unit.\n(kg)",
                       "Long. total (m)": "Long. total\n(m)", "Peso total (kg)": "Peso total\n(kg)"}
 
@@ -73,7 +74,7 @@ class ScheduleTable(QTableWidget):
         return next((row for row, line in self._lines.items() if line.mark == mark), None)
 
     def populate(self, schedules: Sequence[ElementSchedule], dim_labels: list[str]) -> None:
-        headers = self.FIXED + dim_labels + self.TAIL
+        headers = self.FIXED + dim_labels + ["Ganchos (° · mm)"] + self.TAIL
         col = {name: i for i, name in enumerate(headers)}
         n_cols = len(headers)
         self.clear()
@@ -110,7 +111,7 @@ class ScheduleTable(QTableWidget):
             self._fill_totals(row, col, length, weight, _NAVY, QColor("white"))
             self.setRowHeight(row, 28)
 
-        widths = {"Marca": 60, "Barra": 54, "Ø (mm)": 66, "Esquema": IMG_W + 16, "Forma": 58, "Cant. por elem.": 76,
+        widths = {"Marca": 60, "Barra": 54, "Ø (mm)": 66, "Esquema": IMG_W + 16, "Forma": 58, "Ganchos (° · mm)": 96, "Cant. por elem.": 76,
                   "Total barras": 66, "Long. corte (mm)": 92, "Peso unit. (kg)": 84, "Long. total (m)": 88,
                   "Peso total (kg)": 88}
         for name, index in col.items():
@@ -127,11 +128,12 @@ class ScheduleTable(QTableWidget):
         self.setItem(row, col["Barra"], _item(line.rebar.designation, _CENTER))
         self.setItem(row, col["Ø (mm)"], _item(f"{line.rebar.diameter_mm:.1f}", _CENTER))
         picture = _item("", _CENTER)
-        picture.setIcon(QIcon(shape_pixmap(line.shape, IMG_W, IMG_H)))
+        picture.setIcon(QIcon(shape_pixmap(line.shape, IMG_W, IMG_H, line.rebar)))
         self.setItem(row, col["Esquema"], picture)
         self.setItem(row, col["Forma"], _item(line.shape.code, _CENTER, bold=True))
         for label in dim_labels:
             self.setItem(row, col[label], _item(f"{dims[label]:,.0f}" if label in dims else "", _RIGHT))
+        self.setItem(row, col["Ganchos (° · mm)"], _item(line.hook_text, _CENTER))
         self.setItem(row, col["Cant. por elem."], _item(line.group.quantity, _CENTER))
         self.setItem(row, col["Total barras"], _item(f"{line.total_bars:,}", _CENTER))
         self.setItem(row, col["Long. corte (mm)"], _item(f"{line.cut_length_mm:,.0f}", _RIGHT))
@@ -163,8 +165,8 @@ def _wrap_header(text: str) -> str:
     return text[:cut] + "\n" + text[cut + 1:]
 
 
-def _data_table(headers: list[str], rows: list[list[str]], total: list[str]) -> QTableWidget:
-    table = QTableWidget(len(rows) + 1, len(headers))
+def _data_table(headers: list[str], rows: list[list[str]], total: list[str] | None) -> QTableWidget:
+    table = QTableWidget(len(rows) + (1 if total is not None else 0), len(headers))
     table.setHorizontalHeaderLabels([_wrap_header(h) for h in headers])
     table.verticalHeader().setVisible(False)
     table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -174,12 +176,12 @@ def _data_table(headers: list[str], rows: list[list[str]], total: list[str]) -> 
     table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
     table.horizontalHeader().setFixedHeight(42)
     table.horizontalHeader().setStyleSheet("QHeaderView::section { font-size: 9pt; }")
-    for r, values in enumerate(rows + [total]):
-        is_total = r == len(rows)
+    for r, values in enumerate(rows + ([total] if total is not None else [])):
+        is_total = total is not None and r == len(rows)
         for c, value in enumerate(values):
             table.setItem(r, c, _item(value, _LEFT if c == 0 else _RIGHT, bold=is_total, bg=_SUBTOTAL if is_total else None))
         table.setRowHeight(r, 26)
-    table.setFixedHeight(42 + 26 * (len(rows) + 1) + 4)
+    table.setFixedHeight(42 + 26 * table.rowCount() + 4)
     return table
 
 
@@ -220,15 +222,22 @@ class SummaryView(QScrollArea):
             ["TOTAL", "", "", "", n(sum(s.total_bars for s in summaries), 0), n(result.total_length_m),
              n(result.total_weight_kg), "100.0%"],
         ))
-        section(f"2. Desperdicio de corte (barras comerciales de {result.stock_length_mm / 1000:.2f} m)", _data_table(
-            ["Barra", "Grado", "Barras comerciales", "Comprada (m)", "Long. útil (m)", "Desperdicio (m)",
-             "Desperdicio (kg)", "Desperdicio (%)", "A comprar (kg)"],
-            [[s.rebar.designation, s.rebar.grade.name, n(s.stock_bars, 0), n(s.purchased_length_m), n(s.total_length_m),
-              n(s.waste_length_m), n(s.waste_weight_kg), f"{s.waste_pct:.1%}", n(s.purchase_weight_kg)] for s in summaries],
-            ["TOTAL", "", n(sum(s.stock_bars for s in summaries), 0), n(sum(s.purchased_length_m for s in summaries)),
-             n(result.total_length_m), n(sum(s.waste_length_m for s in summaries)), n(result.total_waste_weight_kg),
-             f"{result.total_waste_pct:.1%}", n(result.total_purchase_weight_kg)],
-        ))
+        reusable = summaries[0].reusable_remnant_mm
+        section(
+            f"2. Sobrante de corte (plan optimizado con barras de {result.stock_length_mm / 1000:.2f} m; "
+            + (f"retal reutilizable desde {reusable / 1000:.2f} m)" if reusable > 0 else "sin retales reutilizables)"),
+            _data_table(
+                ["Barra", "Grado", "Barras comerciales", "Long. comprada (m)", "Long. útil (m)", "Sobrante (m)",
+                 "Sobrante (kg)", "Sobrante (%)", "Peso a comprar (kg)", "Retal reutilizable (m)", "Desperdicio definitivo (%)"],
+                [[s.rebar.designation, s.rebar.grade.name, n(s.stock_bars, 0), n(s.purchased_length_m), n(s.total_length_m),
+                  n(s.waste_length_m), n(s.waste_weight_kg), f"{s.waste_pct:.1%}", n(s.purchase_weight_kg),
+                  n(s.reusable_length_m), f"{s.scrap_pct:.1%}"] for s in summaries],
+                ["TOTAL", "", n(sum(s.stock_bars for s in summaries), 0), n(sum(s.purchased_length_m for s in summaries)),
+                 n(result.total_length_m), n(sum(s.waste_length_m for s in summaries)), n(result.total_waste_weight_kg),
+                 f"{result.total_waste_pct:.1%}", n(result.total_purchase_weight_kg),
+                 n(sum(s.reusable_length_m for s in summaries)), f"{result.total_scrap_pct:.1%}"],
+            ),
+        )
         by_level = result.weight_by_level_and_diameter()
         multi_grade = len({s.rebar.designation for s in summaries}) != len(summaries)
         section("3. Consolidado por nivel (peso neto, kg)", _data_table(
@@ -237,5 +246,83 @@ class SummaryView(QScrollArea):
               *[n(by_level[level].get(s.rebar, 0.0)) for level in result.levels], n(s.total_weight_kg)] for s in summaries],
             ["TOTAL", *[n(sum(by_level[level].values())) for level in result.levels], n(result.total_weight_kg)],
         ))
+        comparisons = stock_comparison(result)
+        if comparisons:
+            lengths = sorted({o.stock_length_mm for c in comparisons for o in c.options})
+            rows = []
+            for c in comparisons:
+                by_length = {o.stock_length_mm: o for o in c.options}
+                rows.append([c.summary.rebar.designation, c.summary.rebar.grade.name]
+                            + [f"{by_length[l].bars} · {by_length[l].waste_pct:.1%}" if l in by_length else "no caben" for l in lengths]
+                            + [f"{c.best_mm / 1000:.2f} m" if c.best_mm else "—"])
+            section("4. Longitud comercial recomendada (barras · sobrante, con el plan optimizado de cada una)",
+                    _data_table(["Barra", "Grado", *[f"{l / 1000:.2f} m" for l in lengths], "Recomendada"], rows, None))
         layout.addStretch(1)
         self.setWidget(body)
+
+
+class CuttingPlanTable(QTableWidget):
+    """Plan y secuencia de corte por diámetro, con el dibujo de cada barra comercial."""
+
+    HEADERS = ["Paso", "Barras N°", "Cant.", "Esquema de corte (m)", "Cortes (mm)", "Marcas", "Retal (mm)", "Uso del retal"]
+    PLAN_W, PLAN_H = 380, 28
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.setIconSize(QSize(self.PLAN_W, self.PLAN_H))
+        self.verticalHeader().setVisible(False)
+        self.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        self.setColumnCount(len(self.HEADERS))
+        self.setHorizontalHeaderLabels(self.HEADERS)
+        self.populate(None)
+
+    def populate(self, result: BBSResult | None) -> None:
+        self.clear()
+        self.clearSpans()
+        self.setHorizontalHeaderLabels(self.HEADERS)
+        summaries = result.diameter_summaries if result else ()
+        n_rows = sum(1 + max(len(plan_rows(s)), 1) + (1 if s.plan.stock_bars else 0) for s in summaries)
+        self.setRowCount(max(n_rows, 1))
+        if not summaries:
+            self.setSpan(0, 0, 1, len(self.HEADERS))
+            self.setItem(0, 0, _item("Aún no hay barras que cortar. Agregue elementos y barras."))
+            self.setRowHeight(0, 30)
+            return
+        row = 0
+        for summary in summaries:
+            self.setSpan(row, 0, 1, len(self.HEADERS))
+            self.setItem(row, 0, _item(plan_title(summary), bold=True, bg=_BAND))
+            self.setRowHeight(row, 28)
+            row += 1
+            rows = plan_rows(summary)
+            if not rows:
+                self.setSpan(row, 0, 1, len(self.HEADERS))
+                self.setItem(row, 0, _item("Todas las piezas se suministran en rollo: no hay barras comerciales que cortar."))
+                self.setRowHeight(row, 26)
+                row += 1
+                continue
+            for item in rows:
+                picture = _item("", _CENTER)
+                picture.setIcon(QIcon(pattern_pixmap(item.pattern, self.PLAN_W, self.PLAN_H, summary.reusable_remnant_mm)))
+                values = (_item(item.step, _CENTER), _item(item.bars_text, _CENTER), _item(item.count, _CENTER), picture,
+                          _item(item.cuts_text), _item(item.marks_text), _item(f"{item.remnant_mm:,.0f}", _RIGHT),
+                          _item(item.remnant_use, _CENTER, fg=QColor("#2F6B2F") if item.remnant_use == "Reutilizable" else None))
+                for column, cell in enumerate(values):
+                    self.setItem(row, column, cell)
+                self.setRowHeight(row, self.PLAN_H + 10)
+                row += 1
+            self.setSpan(row, 0, 1, 2)
+            self.setItem(row, 0, _item("Total", _RIGHT, bold=True, bg=_SUBTOTAL))
+            self.setItem(row, 2, _item(summary.plan.stock_bars, _CENTER, bold=True, bg=_SUBTOTAL))
+            self.setSpan(row, 4, 1, len(self.HEADERS) - 4)
+            self.setItem(row, 4, _item(
+                f"Sobrante {summary.waste_length_m:,.2f} m  ·  reutilizable {summary.reusable_length_m:,.2f} m  ·  "
+                f"desperdicio {summary.scrap_length_m:,.2f} m", bold=True, bg=_SUBTOTAL))
+            self.setItem(row, 3, _item("", bg=_SUBTOTAL))
+            self.setRowHeight(row, 26)
+            row += 1
+        for column, width in enumerate((50, 70, 54, self.PLAN_W + 16, 230, 230, 80, 100)):
+            self.setColumnWidth(column, width)
+        self.horizontalHeader().setFixedHeight(34)

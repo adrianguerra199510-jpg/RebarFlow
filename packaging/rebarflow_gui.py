@@ -29,12 +29,21 @@ def self_test(folder: Path) -> int:
         window.write_excel(folder / "planilla.xlsx")
         window.write_pdf(folder / "planilla.pdf")
         window.write_project(folder / "proyecto.rebarflow")
-        for name in ("ventana.png", "planilla.xlsx", "planilla.pdf", "proyecto.rebarflow"):
+        report.append(f"peso neto: {window.result.total_weight_kg:.2f} kg")
+        report.append(f"plan de corte: {sum(s.stock_bars for s in window.result.diameter_summaries)} barras comerciales")
+        # Catálogo de formas: una barra de cada plantilla (comprueba que todas se empaquetaron y se dibujan).
+        window.open_catalog()
+        app.processEvents()
+        window.grab().save(str(folder / "catalogo.png"))
+        window.write_excel(folder / "catalogo.xlsx")
+        window.write_pdf(folder / "catalogo.pdf")
+        report.append(f"catálogo: {len(window.result.lines)} marcas, {window.result.total_weight_kg:.2f} kg")
+        for name in ("ventana.png", "planilla.xlsx", "planilla.pdf", "proyecto.rebarflow",
+                     "catalogo.png", "catalogo.xlsx", "catalogo.pdf"):
             size = (folder / name).stat().st_size
             report.append(f"{name}: {size} bytes")
             if size == 0:
                 raise RuntimeError(f"{name} está vacío")
-        report.append(f"peso neto: {window.result.total_weight_kg:.2f} kg")
         report.append("SELF-TEST OK")
         code = 0
     except Exception:  # noqa: BLE001 - se informa cualquier fallo del empaquetado

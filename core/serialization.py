@@ -30,6 +30,7 @@ def project_to_dict(project: Project) -> dict[str, Any]:
         "author": project.author,
         "stock_length_mm": project.stock_length_mm,
         "length_rounding_mm": project.length_rounding_mm,
+        "reusable_remnant_mm": project.reusable_remnant_mm,
         "paper": project.paper,
         "elements": [
             {
@@ -76,6 +77,7 @@ def project_from_dict(data: dict[str, Any]) -> Project:
             author=data.get("author", ""),
             stock_length_mm=data["stock_length_mm"],
             length_rounding_mm=data["length_rounding_mm"],
+            reusable_remnant_mm=data.get("reusable_remnant_mm", 1000.0),
             paper=data.get("paper", "letter"),
             elements=elements,
         )

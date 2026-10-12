@@ -29,7 +29,7 @@ def test_workbook_structure_and_totals(result, tmp_path):
     path = ExcelExporter(project_name="Proyecto X").export(result, tmp_path / "out" / "bbs.xlsx")
     assert path.exists()
     wb = load_workbook(path)
-    assert wb.sheetnames == ["Planilla BBS", "Resumen"]
+    assert wb.sheetnames == ["Planilla BBS", "Resumen", "Plan de corte"]
 
     ws = wb["Planilla BBS"]
     headers = [c.value for c in ws[7]]
@@ -68,12 +68,12 @@ def test_summary_sheet(result, tmp_path):
     )
     labels = [ws.cell(r, 1).value for r in range(1, ws.max_row + 1)]
     assert sum(1 for v in labels if v == "TOTAL") == 3  # tres tablas
-    assert any("Desperdicio de corte" in str(v) for v in labels)
+    assert any("Sobrante de corte" in str(v) for v in labels)
 
 
 def test_empty_result_exports(tmp_path):
     path = ExcelExporter().export(BBSCalculator().calculate([]), tmp_path / "empty.xlsx")
-    assert load_workbook(path).sheetnames == ["Planilla BBS", "Resumen"]
+    assert load_workbook(path).sheetnames == ["Planilla BBS", "Resumen", "Plan de corte"]
 
 
 def test_shape_images_are_embedded_one_per_line(result, tmp_path):

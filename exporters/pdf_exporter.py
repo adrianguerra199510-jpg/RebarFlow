@@ -21,6 +21,8 @@ from reportlab.platypus import (Image, KeepTogether, PageBreak, Paragraph, Simpl
                                 TableStyle)
 
 from engine.bbs_calculator import BBSResult, ElementSchedule, ScheduleLine
+from engine.cutting_report import plan_rows, plan_title, stock_comparison
+from exporters.cutting_images import render_pattern_png
 from exporters.shape_images import render_shape_png
 
 _NAVY = colors.HexColor("#1F3864")
@@ -32,6 +34,7 @@ _RED = "#C00000"
 _PAGE_SIZES = {"letter": LETTER, "a4": A4}
 _MARGIN = 28
 _IMG_W, _IMG_H = 120, 45  # puntos; proporción 8:3 igual que el PNG
+_PLAN_W, _PLAN_H = 256, 22  # barra comercial del plan de corte (puntos)
 
 _BASE = ParagraphStyle("base", fontName="Helvetica", fontSize=7.5, leading=9)
 _CELL_LEFT = ParagraphStyle("cell_left", parent=_BASE)
@@ -120,11 +123,15 @@ class PdfExporter:
         )
         story = self._title_block(result, issued, usable)
         dim_labels = result.dimension_labels
+        frame_height = pagesize[1] - doc.topMargin - doc.bottomMargin
         for schedule in result.element_schedules:
-            story += [Spacer(1, 8), KeepTogether([self._element_table(schedule, dim_labels, usable)])]
+            table = self._element_table(schedule, dim_labels, usable)
+            _, height = table.wrap(usable, frame_height)
+            # una tabla que cabe en una página no se parte; una más alta empieza donde está y se parte con cabecera repetida
+            story += [Spacer(1, 8), KeepTogether([table]) if height < 0.92 * frame_height else table]
         if result.element_schedules:
             story += [Spacer(1, 6), self._grand_total(result, usable)]
-        story += [PageBreak(), *self._summary(result, usable)]
+        story += [PageBreak(), *self._summary(result, usable), PageBreak(), *self._cutting_plan(result, usable)]
 
         footer = f"{self.project_name}  ·  {issued}"
         canvas_cls = type("FooterCanvas", (_NumberedCanvas,), {"footer_left": footer})
@@ -151,15 +158,17 @@ class PdfExporter:
         if self.include_shape_images:
             columns.append(("Esquema", _IMG_W + 10))
         columns.append(("Forma", 62))
-        columns += [(label, 36) for label in dim_labels]
-        columns += [("Long. corte (mm)", 46), ("Cant. por elem.", 36), ("Total barras", 38), ("Peso unit. (kg)", 42),
+        columns += [(label, 32) for label in dim_labels]
+        columns += [("Ganchos (° · mm)", 58), ("Long. corte (mm)", 46), ("Cant. por elem.", 36), ("Total barras", 38), ("Peso unit. (kg)", 42),
                     ("Long. total (m)", 46), ("Peso total (kg)", 48)]
         fixed = sum(width for _, width in columns)
-        observations = max(usable - fixed, 70)
+        observations = max(usable - fixed, 84)
         columns.append(("Observaciones", observations))
         total = fixed + observations
-        scale = usable / total if total > usable else 1.0  # muchas cotas: se comprimen todas las columnas
-        return [(name, width * scale) for name, width in columns]
+        picture = _IMG_W + 10 if self.include_shape_images else 0
+        # muchas cotas: se comprimen todas las columnas menos la del esquema, que debe seguir conteniendo su imagen
+        scale = (usable - picture) / (total - picture) if total > usable else 1.0
+        return [(name, width if name == "Esquema" else width * scale) for name, width in columns]
 
     def _element_table(self, schedule: ElementSchedule, dim_labels: list[str], usable: float) -> Table:
         columns = self._columns(dim_labels, usable)
@@ -203,6 +212,7 @@ class PdfExporter:
             "Barra": _p(line.rebar.designation, _CELL_CENTER),
             "Ø (mm)": _p(f"{line.rebar.diameter_mm:.1f}", _CELL_CENTER),
             "Forma": _p(line.shape.label),
+            "Ganchos (° · mm)": _p(line.hook_text, _CELL_CENTER),
             "Long. corte (mm)": _p(_n(line.cut_length_mm, 0), _CELL_RIGHT),
             "Cant. por elem.": _p(line.group.quantity, _CELL_CENTER),
             "Total barras": _p(line.total_bars, _CELL_CENTER),
@@ -214,7 +224,7 @@ class PdfExporter:
         for label in dim_labels:
             cells[label] = _p(_n(dims[label], 0), _CELL_RIGHT) if label in dims else ""
         if self.include_shape_images:
-            cells["Esquema"] = Image(BytesIO(render_shape_png(line.shape, 3 * _IMG_W, 3 * _IMG_H)),
+            cells["Esquema"] = Image(BytesIO(render_shape_png(line.shape, 3 * _IMG_W, 3 * _IMG_H, line.rebar)),
                                      width=_IMG_W, height=_IMG_H)
         return [cells[name] for name in names]
 
@@ -245,17 +255,20 @@ class PdfExporter:
             usable,
         )]
 
+        reusable = summaries[0].reusable_remnant_mm if summaries else 0.0
         story += [Paragraph(
-            f"2. Desperdicio de corte (barras comerciales de {result.stock_length_mm / 1000:.2f} m, "
-            "empaquetado First Fit Decreasing)", _SECTION), self._data_table(
-            ["Barra", "Grado", "Barras comerciales", "Long. comprada (m)", "Long. útil (m)", "Desperdicio (m)",
-             "Desperdicio (kg)", "Desperdicio (%)", "Peso a comprar (kg)"],
+            f"2. Sobrante de corte (plan optimizado con barras comerciales de {result.stock_length_mm / 1000:.2f} m; "
+            + (f"retal reutilizable desde {reusable / 1000:.2f} m)" if reusable > 0 else "sin retales reutilizables)"),
+            _SECTION), self._data_table(
+            ["Barra", "Grado", "Barras comerciales", "Long. comprada (m)", "Long. útil (m)", "Sobrante (m)",
+             "Sobrante (kg)", "Sobrante (%)", "Peso a comprar (kg)", "Retal reutilizable (m)", "Desperdicio definitivo (%)"],
             [[s.rebar.designation, s.rebar.grade.name, _n(s.stock_bars, 0), _n(s.purchased_length_m),
               _n(s.total_length_m), _n(s.waste_length_m), _n(s.waste_weight_kg), f"{s.waste_pct:.1%}",
-              _n(s.purchase_weight_kg)] for s in summaries],
+              _n(s.purchase_weight_kg), _n(s.reusable_length_m), f"{s.scrap_pct:.1%}"] for s in summaries],
             ["TOTAL", "", _n(sum(s.stock_bars for s in summaries), 0), _n(sum(s.purchased_length_m for s in summaries)),
              _n(result.total_length_m), _n(sum(s.waste_length_m for s in summaries)), _n(result.total_waste_weight_kg),
-             f"{result.total_waste_pct:.1%}", _n(result.total_purchase_weight_kg)],
+             f"{result.total_waste_pct:.1%}", _n(result.total_purchase_weight_kg),
+             _n(sum(s.reusable_length_m for s in summaries)), f"{result.total_scrap_pct:.1%}"],
             usable,
         )]
 
@@ -269,19 +282,75 @@ class PdfExporter:
             ["TOTAL", *[_n(sum(by_level[level].values())) for level in result.levels], _n(result.total_weight_kg)],
             usable,
         )]
+
+        comparisons = stock_comparison(result)
+        if comparisons:
+            lengths = sorted({o.stock_length_mm for c in comparisons for o in c.options})
+            rows = []
+            for c in comparisons:
+                by_length = {o.stock_length_mm: o for o in c.options}
+                rows.append([c.summary.rebar.designation, c.summary.rebar.grade.name]
+                            + [f"{by_length[l].bars} · {by_length[l].waste_pct:.1%}" if l in by_length else "no caben" for l in lengths]
+                            + [f"{c.best_mm / 1000:.2f} m" if c.best_mm else "—"])
+            story += [Paragraph("4. Longitud comercial recomendada (barras · sobrante, con el plan optimizado de cada una)", _SECTION),
+                      self._data_table(["Barra", "Grado", *[f"{l / 1000:.2f} m" for l in lengths], "Recomendada"], rows, None, usable)]
+        return story
+
+    # --------------------------------------------------------------- plan de corte
+    def _cutting_plan(self, result: BBSResult, usable: float) -> list:
+        story: list = [Paragraph("PLAN Y SECUENCIA DE CORTE", _TITLE), Spacer(1, 3),
+                       Paragraph("Cada barra comercial se corta de izquierda a derecha; el tramo rayado final es el retal "
+                                 "(verde: reutilizable, gris: desperdicio).", _INFO_TEXT)]
+        if not result.diameter_summaries:
+            return story + [Paragraph("Sin barras que cortar.", _INFO_TEXT)]
+        headers = ["Paso", "Barras N°", "Cant.", "Esquema de corte (m)", "Cortes (mm)", "Marcas", "Retal (mm)", "Uso del retal"]
+        widths = [30, 44, 30, _PLAN_W + 10, 120, 112, 46, 52]
+        scale = min(1.0, usable / sum(widths))
+        widths = [w * scale for w in widths]
+        for summary in result.diameter_summaries:
+            block: list = [Paragraph(escape(plan_title(summary)), _SECTION)]
+            rows = plan_rows(summary)
+            if not rows:
+                story += [*block, Paragraph("Todas las piezas se suministran en rollo: no hay barras comerciales que cortar.", _INFO_TEXT)]
+                continue
+            data = [[_p(h, _HEADER) for h in headers]]
+            for item in rows:
+                image = Image(BytesIO(render_pattern_png(item.pattern, 3 * _PLAN_W, 3 * _PLAN_H, summary.reusable_remnant_mm)),
+                              width=_PLAN_W, height=_PLAN_H)
+                data.append([_p(item.step, _CELL_CENTER), _p(item.bars_text, _CELL_CENTER), _p(item.count, _CELL_CENTER), image,
+                             _p(item.cuts_text), Paragraph(escape(item.marks_text), ParagraphStyle("marks", parent=_BASE, fontSize=6.5, leading=8)),
+                             _p(_n(item.remnant_mm, 0), _CELL_RIGHT), _p(item.remnant_use, _CELL_CENTER)])
+            data.append([_p("Total", _BOLD_RIGHT), "", _p(summary.plan.stock_bars, _CELL_CENTER), "",
+                         _p(f"Sobrante {_n(summary.waste_length_m)} m · reutilizable {_n(summary.reusable_length_m)} m · "
+                            f"desperdicio {_n(summary.scrap_length_m)} m", _BOLD_LEFT), "", "", ""])
+            last = len(data) - 1
+            table = Table(data, colWidths=widths, repeatRows=1)
+            table.setStyle(TableStyle([
+                ("GRID", (0, 0), (-1, -1), 0.4, _GRID), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("BACKGROUND", (0, 0), (-1, 0), _NAVY), ("BACKGROUND", (0, last), (-1, last), _SUBTOTAL),
+                ("SPAN", (0, last), (1, last)), ("SPAN", (4, last), (-1, last)),
+                ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+            ]))
+            if len(rows) <= 12:
+                story.append(KeepTogether([*block, table]))
+            else:  # una sección larga puede partirse entre páginas (la cabecera de la tabla se repite)
+                story += [*block, table]
         return story
 
     @staticmethod
-    def _data_table(headers: list[str], rows: list[list[str]], total: list[str], usable: float) -> Table:
+    def _data_table(headers: list[str], rows: list[list[str]], total: list[str] | None, usable: float) -> Table:
         n_cols = len(headers)
         data = [[_p(h, _HEADER) for h in headers]]
         data += [[_p(v, _CELL_LEFT if i == 0 else _CELL_RIGHT) for i, v in enumerate(row)] for row in rows]
-        data.append([_p(v, _BOLD_LEFT if i == 0 else _BOLD_RIGHT) for i, v in enumerate(total)])
+        if total is not None:
+            data.append([_p(v, _BOLD_LEFT if i == 0 else _BOLD_RIGHT) for i, v in enumerate(total)])
         width = min(usable, 80 * n_cols)
         table = Table(data, colWidths=[width / n_cols] * n_cols, hAlign="LEFT")
         table.setStyle(TableStyle([
             ("GRID", (0, 0), (-1, -1), 0.4, _GRID), ("BACKGROUND", (0, 0), (-1, 0), _NAVY),
-            ("BACKGROUND", (0, -1), (-1, -1), _SUBTOTAL), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            *([("BACKGROUND", (0, -1), (-1, -1), _SUBTOTAL)] if total is not None else []),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
         ]))
         return table

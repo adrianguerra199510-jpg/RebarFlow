@@ -15,13 +15,14 @@ Las longitudes de corte se redondean **hacia arriba** al múltiplo de ``length_r
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from itertools import groupby
 
 from core.element import RebarGroup, StructuralElement
 from core.rebar import Rebar
 from core.shape_codes import ShapeCode
+from engine.cutting_optimizer import CuttingPlan, compare_stock_lengths, optimize_cutting
 
 DEFAULT_STOCK_LENGTH_MM = 12_000.0
 _EPS = 1e-6
@@ -60,6 +61,11 @@ class ScheduleLine:
         return self.group.cut.notes
 
     @property
+    def hook_text(self) -> str:
+        """Ganchos de la barra como ``"2 × 135° · 75"`` (ángulo · largo de la extensión en mm)."""
+        return self.group.cut.hook_text
+
+    @property
     def warnings(self) -> tuple[str, ...]:
         return self.group.cut.warnings
 
@@ -82,31 +88,80 @@ class ElementSchedule:
 
 @dataclass(frozen=True)
 class DiameterSummary:
-    """Consolidado de una barra (designación y grado) en todo el proyecto."""
+    """Consolidado de una barra (designación y grado) en todo el proyecto, con su plan de corte.
+
+    Las piezas que salen de barras comerciales siguen ``plan`` (secuencia de corte optimizada); las de rollo
+    (espirales) se suministran a su longitud y no generan retales.
+    """
 
     rebar: Rebar
     total_bars: int
     total_length_m: float
     total_weight_kg: float  # peso neto de la planilla
-    stock_bars: int  # barras comerciales necesarias
-    purchased_length_m: float  # stock_bars x longitud comercial
+    plan: CuttingPlan  # plan de corte de las piezas que salen de barras comerciales
+    pieces: Mapping[float, int] = field(default_factory=dict)  # largo de corte (mm) → cantidad, solo piezas cortadas
+    length_marks: Mapping[float, tuple[str, ...]] = field(default_factory=dict)  # largo → "elemento/marca"
+    coil_length_m: float = 0.0  # longitud suministrada en rollo
+    reusable_remnant_mm: float = 0.0  # un retal de al menos esta longitud se considera reutilizable
+
+    @property
+    def stock_bars(self) -> int:
+        """Barras comerciales necesarias."""
+        return self.plan.stock_bars
+
+    @property
+    def purchased_length_m(self) -> float:
+        return self.plan.purchased_length_mm / 1000.0 + self.coil_length_m
 
     @property
     def waste_length_m(self) -> float:
-        return self.purchased_length_m - self.total_length_m
+        """Sobrante total de las barras comerciales (retales reutilizables más desperdicio)."""
+        return self.plan.remnant_length_mm / 1000.0
+
+    @property
+    def reusable_length_m(self) -> float:
+        return self.plan.remnants(self.reusable_remnant_mm)[0] / 1000.0
+
+    @property
+    def scrap_length_m(self) -> float:
+        """Desperdicio definitivo: retales demasiado cortos para reutilizar."""
+        return self.plan.remnants(self.reusable_remnant_mm)[1] / 1000.0
 
     @property
     def waste_weight_kg(self) -> float:
         return self.rebar.mass_for_length(self.waste_length_m)
 
     @property
+    def reusable_weight_kg(self) -> float:
+        return self.rebar.mass_for_length(self.reusable_length_m)
+
+    @property
+    def scrap_weight_kg(self) -> float:
+        return self.rebar.mass_for_length(self.scrap_length_m)
+
+    @property
     def waste_pct(self) -> float:
-        """Desperdicio como fracción de la longitud comprada (0 a 1)."""
+        """Sobrante como fracción de la longitud comprada (0 a 1)."""
         return self.waste_length_m / self.purchased_length_m if self.purchased_length_m else 0.0
+
+    @property
+    def scrap_pct(self) -> float:
+        return self.scrap_length_m / self.purchased_length_m if self.purchased_length_m else 0.0
 
     @property
     def purchase_weight_kg(self) -> float:
         return self.rebar.mass_for_length(self.purchased_length_m)
+
+    def marks_for(self, length_mm: float) -> tuple[str, ...]:
+        """Marcas ("elemento/marca") que usan piezas de ese largo de corte (tolerancia de 1 mm)."""
+        if length_mm in self.length_marks:
+            return self.length_marks[length_mm]
+        near = [key for key in self.length_marks if abs(key - length_mm) <= 1.0]
+        return self.length_marks[min(near, key=lambda k: abs(k - length_mm))] if near else ()
+
+    def compare_stock_lengths(self, lengths: Sequence[float]) -> dict[float, CuttingPlan]:
+        """Plan de corte para cada longitud comercial candidata en la que quepan todas las piezas."""
+        return compare_stock_lengths(self.pieces, lengths)
 
 
 @dataclass(frozen=True)
@@ -143,6 +198,19 @@ class BBSResult:
         return self.total_waste_weight_kg / purchased if purchased else 0.0
 
     @property
+    def total_reusable_weight_kg(self) -> float:
+        return math.fsum(s.reusable_weight_kg for s in self.diameter_summaries)
+
+    @property
+    def total_scrap_weight_kg(self) -> float:
+        return math.fsum(s.scrap_weight_kg for s in self.diameter_summaries)
+
+    @property
+    def total_scrap_pct(self) -> float:
+        purchased = self.total_purchase_weight_kg
+        return self.total_scrap_weight_kg / purchased if purchased else 0.0
+
+    @property
     def dimension_labels(self) -> list[str]:
         """Rótulos de cota presentes en las formas usadas ("A", "B", "C"…), ordenados."""
         return dimension_labels(self.lines)
@@ -175,28 +243,8 @@ def round_up_to_step(value: float, step: float) -> float:
 
 
 def count_stock_bars(pieces: Mapping[float, int], stock_length_mm: float) -> int:
-    """Barras comerciales necesarias para cortar ``pieces`` ({longitud mm: cantidad}).
-
-    Empaquetado 1D por *First Fit Decreasing*: las piezas se ordenan de mayor a menor y cada
-    una se coloca en la primera barra con espacio. Las piezas iguales se colocan en bloque,
-    lo que equivale al algoritmo pieza a pieza pero escala a miles de estribos.
-    """
-    free: list[float] = []  # espacio libre de cada barra comercial abierta
-    for length in sorted(pieces, reverse=True):
-        remaining = pieces[length]
-        for i, room in enumerate(free):
-            if remaining == 0:
-                break
-            fit = min(remaining, int((room + _EPS) // length))
-            if fit:
-                free[i] = room - fit * length
-                remaining -= fit
-        per_bar = int((stock_length_mm + _EPS) // length)
-        while remaining:
-            fit = min(remaining, per_bar)
-            free.append(stock_length_mm - fit * length)
-            remaining -= fit
-    return len(free)
+    """Barras comerciales necesarias para cortar ``pieces`` ({longitud mm: cantidad}) con el plan optimizado."""
+    return optimize_cutting(pieces, stock_length_mm).stock_bars
 
 
 @dataclass
@@ -204,12 +252,15 @@ class BBSCalculator:
     """Calcula la planilla de despiece de una lista de elementos.
 
     Attributes:
-        stock_length_mm: Longitud de la barra comercial para el cálculo de desperdicios.
+        stock_length_mm: Longitud de la barra comercial para el plan de corte y los desperdicios.
         length_rounding_mm: Paso de redondeo (hacia arriba) de la longitud de corte.
+        reusable_remnant_mm: Un retal de al menos esta longitud se considera reutilizable y no desperdicio
+            (0 = ningún retal se reutiliza).
     """
 
     stock_length_mm: float = DEFAULT_STOCK_LENGTH_MM
     length_rounding_mm: float = 5.0
+    reusable_remnant_mm: float = 1000.0
 
     def __post_init__(self) -> None:
         if self.stock_length_mm <= 0:
@@ -230,24 +281,34 @@ class BBSCalculator:
         for _, group in groupby(sorted(lines, key=sort_key), key=sort_key):
             group_lines = list(group)
             pieces: dict[float, int] = {}
+            marks: dict[float, list[str]] = {}
+            coil_length_m = 0.0
             for line in group_lines:
+                if line.shape.from_coil:
+                    coil_length_m += line.total_length_m
+                    continue
                 pieces[line.cut_length_mm] = pieces.get(line.cut_length_mm, 0) + line.total_bars
-            stock_bars = count_stock_bars(pieces, self.stock_length_mm)
+                name = f"{line.element.name}/{line.mark}"
+                if name not in marks.setdefault(line.cut_length_mm, []):
+                    marks[line.cut_length_mm].append(name)
             summaries.append(
                 DiameterSummary(
                     rebar=group_lines[0].rebar,
                     total_bars=sum(line.total_bars for line in group_lines),
                     total_length_m=math.fsum(line.total_length_m for line in group_lines),
                     total_weight_kg=math.fsum(line.total_weight_kg for line in group_lines),
-                    stock_bars=stock_bars,
-                    purchased_length_m=stock_bars * self.stock_length_mm / 1000.0,
+                    plan=optimize_cutting(pieces, self.stock_length_mm),
+                    pieces=pieces,
+                    length_marks={length: tuple(names) for length, names in marks.items()},
+                    coil_length_m=coil_length_m,
+                    reusable_remnant_mm=self.reusable_remnant_mm,
                 )
             )
         return BBSResult(schedules, tuple(summaries), self.stock_length_mm)
 
     def _build_line(self, element: StructuralElement, group: RebarGroup) -> ScheduleLine:
         cut_mm = round_up_to_step(group.cut_length_mm, self.length_rounding_mm)
-        if cut_mm > self.stock_length_mm + _EPS:
+        if cut_mm > self.stock_length_mm + _EPS and not group.shape.from_coil:
             raise ValueError(
                 f"{element.name} / marca {group.mark}: la barra mide {cut_mm / 1000:.2f} m y excede la barra "
                 f"comercial de {self.stock_length_mm / 1000:.2f} m; divídala en barras traslapadas."

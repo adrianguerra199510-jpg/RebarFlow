@@ -8,17 +8,28 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
 
+from core.rebar import Rebar
 from core.shape_codes import ShapeCode
 from engine.bbs_calculator import ScheduleLine
+from engine.cutting_optimizer import CutPattern
+from exporters.cutting_images import render_pattern_png
 from exporters.shape_images import render_shape_png
 
 _DPR = 2  # el PNG se genera al doble de resolución para que se vea nítido en pantallas densas
 
 
-def shape_pixmap(shape: ShapeCode, width: int, height: int) -> QPixmap:
-    """Pixmap del esquema de ``shape`` de ``width`` x ``height`` píxeles lógicos."""
+def shape_pixmap(shape: ShapeCode, width: int, height: int, rebar: Rebar | None = None) -> QPixmap:
+    """Pixmap del esquema de ``shape`` de ``width`` x ``height`` píxeles lógicos (con ``rebar``, rotula los ganchos)."""
     pixmap = QPixmap()
-    pixmap.loadFromData(render_shape_png(shape, _DPR * width, _DPR * height))
+    pixmap.loadFromData(render_shape_png(shape, _DPR * width, _DPR * height, rebar))
+    pixmap.setDevicePixelRatio(_DPR)
+    return pixmap
+
+
+def pattern_pixmap(pattern: CutPattern, width: int, height: int, min_reusable_mm: float = 0.0) -> QPixmap:
+    """Pixmap de una barra comercial cortada según ``pattern``."""
+    pixmap = QPixmap()
+    pixmap.loadFromData(render_pattern_png(pattern, _DPR * width, _DPR * height, min_reusable_mm))
     pixmap.setDevicePixelRatio(_DPR)
     return pixmap
 
@@ -33,13 +44,13 @@ class ShapePreview(QLabel):
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setObjectName("shapePreview")
 
-    def set_shape(self, shape: ShapeCode | None, placeholder: str = "") -> None:
+    def set_shape(self, shape: ShapeCode | None, placeholder: str = "", rebar: Rebar | None = None) -> None:
         if shape is None:
             self.setPixmap(QPixmap())
             self.setText(placeholder)
         else:
             self.setText("")
-            self.setPixmap(shape_pixmap(shape, *self._size))
+            self.setPixmap(shape_pixmap(shape, *self._size, rebar))
 
 
 def _row(label: str, value: str) -> str:
@@ -78,6 +89,7 @@ class BarDetailPanel(QFrame):
             _row("Cotas (mm)", dims),
             _row("Σ cotas", f"{cut.dimension_sum_mm:,.1f} mm"),
             _row("Ajuste por dobleces", f"{cut.bend_adjustment_mm:+,.1f} mm"),
+            _row("Ganchos (° · mm)", line.hook_text or "—"),
             _row("Extensiones de gancho", f"{cut.extension_mm:,.1f} mm"),
             _row("Longitud de corte", f"{cut.total_mm:,.1f} → {line.cut_length_mm:,.0f} mm"),
             _row("Peso unitario", f"{line.unit_weight_kg:,.2f} kg"),
@@ -90,5 +102,5 @@ class BarDetailPanel(QFrame):
         if line.group.description:
             html += f"<p><i>{escape(line.group.description)}</i></p>"
         self.title.setText(f"Marca {escape(line.mark)}  ·  {escape(line.rebar.label)}  ·  {escape(line.rebar.grade.name)}")
-        self.preview.set_shape(line.shape)
+        self.preview.set_shape(line.shape, rebar=line.rebar)
         self.details.setText(html)

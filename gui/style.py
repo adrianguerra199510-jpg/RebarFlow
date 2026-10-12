@@ -22,6 +22,7 @@ QPushButton { padding: 5px 14px; }
 QLabel#sectionTitle { font-weight: bold; color: #1F3864; font-size: 11pt; padding-top: 8px; }
 QLabel#detailTitle { font-weight: bold; color: #1F3864; font-size: 11pt; }
 QLabel#elementTitle { font-size: 11pt; color: #1F3864; }
+QLabel#hint { color: #595959; }
 QLabel#banner { background: #FDE8E8; color: #9B1C1C; border: 1px solid #F5B5B5; padding: 6px 10px; }
 QLabel#shapePreview { background: white; border: 1px solid #C9D1E0; color: #6B7280; }
 BarDetailPanel { background: white; }

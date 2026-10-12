@@ -4,13 +4,14 @@ Uso::
 
     python tools/capture_screenshots.py [carpeta_de_salida]     # por defecto: docs/
 
-Requiere PySide6 y, para las imágenes de Excel/PDF, LibreOffice (``soffice``) y ``pdftoppm``.
+Requiere PySide6 y, para las imágenes de Excel/PDF, LibreOffice (``soffice``) y ``pdftoppm``/``pdfinfo``.
 La interfaz se dibuja sin pantalla (``QT_QPA_PLATFORM=offscreen``).
 """
 
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -23,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from gui.app import create_application  # noqa: E402
 from gui.dialogs import BarDialog  # noqa: E402
 from gui.main_window import MainWindow  # noqa: E402
-from sample_project import build_project  # noqa: E402
+from sample_project import build_catalog_project, build_project  # noqa: E402
 
 
 def select_element(window: MainWindow, app, name: str, level: str) -> None:
@@ -57,6 +58,10 @@ def capture_interface(out: Path) -> None:
     app.processEvents()
     window.grab().save(str(out / "ui_resumen.png"))
 
+    window.tabs.setCurrentIndex(3)
+    app.processEvents()
+    window.grab().save(str(out / "ui_plan_corte.png"))
+
     element = window.current_element()
     dialog = BarDialog(window, group=element.groups[3], used_marks=["A1", "A2", "A3"])
     dialog.show()
@@ -66,10 +71,46 @@ def capture_interface(out: Path) -> None:
     error = BarDialog(window, suggested_mark="B1")
     error.shape.setCurrentIndex(error.shape.findText("L · Bastón L"))
     error.bar.setCurrentIndex(error.bar.findData("#8"))
-    error._spins["a"].setValue(60)
+    error._widgets["a"].setValue(60)
     error.show()
     app.processEvents()
     error.grab().save(str(out / "ui_dialogo_error.png"))
+
+    custom = BarDialog(window, suggested_mark="X1")
+    custom.bar.setCurrentIndex(custom.bar.findData("#4"))
+    custom.shape.setCurrentIndex(custom.shape.findText("X · Personalizada"))
+    custom._editor.set_values((300.0, 200.0, 300.0, 250.0), (90.0, -90.0, 60.0))
+    custom._widgets["hook_end"].setCurrentIndex(custom._widgets["hook_end"].findData(90))
+    custom.show()
+    app.processEvents()
+    custom.grab().save(str(out / "ui_dialogo_personalizada.png"))
+
+    templates = BarDialog(window, suggested_mark="G1")
+    templates.show()
+    templates.shape.showPopup()
+    app.processEvents()
+    popup = templates.shape.view().window()
+    popup.grab().save(str(out / "ui_plantillas.png"))
+    templates.shape.hidePopup()
+
+    window.open_catalog()
+    window.tabs.setCurrentIndex(0)
+    window.resize(1700, 1240)
+    app.processEvents()
+    window.bars_table.selectRow(14)  # la marca ET1, un estribo triangular
+    app.processEvents()
+    window.grab().save(str(out / "ui_catalogo.png"))
+
+
+def _pages(pdf: Path) -> int:
+    info = subprocess.run(["pdfinfo", str(pdf)], capture_output=True, text=True, check=True).stdout
+    return int(re.search(r"Pages:\s+(\d+)", info).group(1))
+
+
+def _png(pdf: Path, page: int, target: Path, resolution: int = 110) -> None:
+    # con ``-singlefile`` pdftoppm añade ".png" al prefijo que se le da
+    subprocess.run(["pdftoppm", "-r", str(resolution), "-f", str(page), "-l", str(page), "-png", "-singlefile",
+                    str(pdf), str(target.with_suffix(""))], check=True)
 
 
 def capture_exports(out: Path) -> None:
@@ -77,20 +118,22 @@ def capture_exports(out: Path) -> None:
     from exporters.excel_exporter import ExcelExporter
     from exporters.pdf_exporter import PdfExporter
 
-    project = build_project()
-    result = BBSCalculator(project.stock_length_mm, project.length_rounding_mm).calculate(project.elements)
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_dir = Path(tmp)
-        xlsx = ExcelExporter(project.name, project.author).export(result, tmp_dir / "planilla.xlsx")
-        pdf = PdfExporter(project.name, project.author, page_size=project.paper).export(result, tmp_dir / "planilla_pdf.pdf")
-        if shutil.which("soffice"):
-            subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", str(tmp_dir), str(xlsx)],
-                           check=True, capture_output=True, timeout=180)
-        if shutil.which("pdftoppm"):
-            for source, name in ((tmp_dir / "planilla.pdf", "export_excel"), (pdf, "export_pdf")):
-                if source.exists():
-                    subprocess.run(["pdftoppm", "-r", "110", "-f", "1", "-l", "1", "-png", "-singlefile",
-                                    str(source), str(out / name)], check=True)
+    for project, prefix in ((build_project(), "export"), (build_catalog_project(), "export_catalogo")):
+        result = BBSCalculator(project.stock_length_mm, project.length_rounding_mm, project.reusable_remnant_mm).calculate(project.elements)
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            xlsx = ExcelExporter(project.name, project.author).export(result, tmp_dir / "planilla.xlsx")
+            pdf = PdfExporter(project.name, project.author, page_size=project.paper).export(result, tmp_dir / "planilla_pdf.pdf")
+            if shutil.which("soffice") and shutil.which("pdftoppm") and prefix == "export":
+                subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", str(tmp_dir), str(xlsx)],
+                               check=True, capture_output=True, timeout=180)
+                excel_pdf = tmp_dir / "planilla.pdf"
+                _png(excel_pdf, 1, out / "export_excel.png")
+                _png(excel_pdf, _pages(excel_pdf), out / "export_excel_plan.png")
+            if shutil.which("pdftoppm"):
+                _png(pdf, 1, out / f"{prefix}_pdf.png")
+                if prefix == "export":
+                    _png(pdf, _pages(pdf), out / "export_pdf_plan.png")
 
 
 if __name__ == "__main__":

@@ -19,6 +19,7 @@ class Project:
         author: Responsable del cálculo.
         stock_length_mm: Longitud de la barra comercial, para el cálculo de desperdicios.
         length_rounding_mm: Paso de redondeo (hacia arriba) de la longitud de corte.
+        reusable_remnant_mm: Un retal de al menos esta longitud se considera reutilizable (0 = ninguno).
         paper: Papel del PDF: ``"letter"`` (carta) o ``"a4"``.
         elements: Elementos estructurales, en el orden de la planilla.
     """
@@ -27,6 +28,7 @@ class Project:
     author: str = ""
     stock_length_mm: float = 12_000.0
     length_rounding_mm: float = 5.0
+    reusable_remnant_mm: float = 1000.0
     paper: str = "letter"
     elements: list[StructuralElement] = field(default_factory=list)
 
@@ -35,6 +37,8 @@ class Project:
             raise ValueError("La longitud de la barra comercial debe ser positiva.")
         if self.length_rounding_mm < 0:
             raise ValueError("El paso de redondeo no puede ser negativo.")
+        if self.reusable_remnant_mm < 0:
+            raise ValueError("La longitud de retal reutilizable no puede ser negativa.")
         if self.paper not in PAPER_SIZES:
             raise ValueError(f"Papel inválido {self.paper!r} (use {' o '.join(PAPER_SIZES)}).")
 

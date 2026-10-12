@@ -28,6 +28,8 @@ from openpyxl.worksheet.properties import PageSetupProperties
 from openpyxl.worksheet.worksheet import Worksheet
 
 from engine.bbs_calculator import BBSResult, ScheduleLine
+from engine.cutting_report import plan_rows, plan_title, stock_comparison
+from exporters.cutting_images import render_pattern_png
 from exporters.shape_images import render_shape_png
 
 _FONT = "Calibri"
@@ -62,6 +64,9 @@ _FMT_PCT = "0.0%"
 # Esquema de la barra: celda de 160 x 60 px (el PNG se genera al doble para que se vea nítido).
 _IMG_W, _IMG_H = 160, 60
 _IMG_ROW_HEIGHT_PT = 52.0
+# Barra comercial del plan de corte: celda de 400 x 30 px.
+_PLAN_W, _PLAN_H = 400, 30
+_PLAN_ROW_HEIGHT_PT = 27.0
 
 
 @dataclass
@@ -86,6 +91,7 @@ class ExcelExporter:
         workbook = Workbook()
         self._write_schedule(workbook.active, result)
         self._write_summary(workbook.create_sheet("Resumen"), result)
+        self._write_plan(workbook.create_sheet("Plan de corte"), result)
         workbook.save(path)
         return path
 
@@ -99,7 +105,7 @@ class ExcelExporter:
             + (["Esquema"] if images else [])
             + ["Forma"]
             + dim_labels
-            + ["Long. corte (mm)", "Cant. por elem.", "Total barras", "Peso unit. (kg)",
+            + ["Ganchos (° · mm)", "Long. corte (mm)", "Cant. por elem.", "Total barras", "Peso unit. (kg)",
                "Long. total (m)", "Peso total (kg)", "Observaciones"]
         )
         n_cols = len(headers)
@@ -141,7 +147,7 @@ class ExcelExporter:
             _style(ws.cell(row, 1, "TOTAL GENERAL"), _HEADER_FONT, _RIGHT, fill=_HEADER_FILL)
             self._write_totals(ws, row, col, n_cols, result.total_length_m, result.total_weight_kg, header=True)
 
-        widths = {"Marca": 8, "Barra": 8, "Ø (mm)": 8, "Esquema": 25, "Forma": 18, "Long. corte (mm)": 12, "Cant. por elem.": 10,
+        widths = {"Marca": 8, "Barra": 8, "Ø (mm)": 8, "Esquema": 25, "Forma": 18, "Ganchos (° · mm)": 17, "Long. corte (mm)": 12, "Cant. por elem.": 10,
                   "Total barras": 10, "Peso unit. (kg)": 11, "Long. total (m)": 12, "Peso total (kg)": 12,
                   "Observaciones": 52}
         for name, c in col.items():
@@ -159,6 +165,7 @@ class ExcelExporter:
             ("Ø (mm)", line.rebar.diameter_mm, "0.0", _CENTER),
             ("Forma", line.shape.label, None, _LEFT),
             *[(label, dims.get(label), _FMT_MM, _RIGHT) for label in dim_labels],
+            ("Ganchos (° · mm)", line.hook_text, None, _CENTER),
             ("Long. corte (mm)", line.cut_length_mm, _FMT_MM, _RIGHT),
             ("Cant. por elem.", line.group.quantity, _FMT_MM, _CENTER),
             ("Total barras", line.total_bars, _FMT_MM, _CENTER),
@@ -175,7 +182,7 @@ class ExcelExporter:
     def _add_shape_image(ws: Worksheet, row: int, column: int, line: ScheduleLine) -> None:
         """Inserta el esquema de ``line`` centrado en la celda (fila alta, columna ``Esquema``)."""
         ws.row_dimensions[row].height = _IMG_ROW_HEIGHT_PT
-        image = XLImage(BytesIO(render_shape_png(line.shape, 2 * _IMG_W, 2 * _IMG_H)))
+        image = XLImage(BytesIO(render_shape_png(line.shape, 2 * _IMG_W, 2 * _IMG_H, line.rebar)))
         row_px = _IMG_ROW_HEIGHT_PT * 96 / 72
         image.anchor = OneCellAnchor(
             _from=AnchorMarker(col=column - 1, colOff=pixels_to_EMU(4), row=row - 1,
@@ -198,7 +205,7 @@ class ExcelExporter:
     # ------------------------------------------------------------- hoja 2: resumen
     def _write_summary(self, ws: Worksheet, result: BBSResult) -> None:
         n_levels = len(result.levels)
-        n_cols = max(9, 2 + n_levels + 1)
+        n_cols = max(11, 2 + n_levels + 1)
         self._write_title_block(ws, n_cols, "RESUMEN Y CONSOLIDADO DE ACERO DE REFUERZO", result)
         row = 7
 
@@ -217,23 +224,25 @@ class ExcelExporter:
         )
 
         # 2. Desperdicio
+        reusable = result.diameter_summaries[0].reusable_remnant_mm if result.diameter_summaries else 0.0
         row = self._section(
             ws, row + 1,
-            f"2. Desperdicio de corte (barras comerciales de {result.stock_length_mm / 1000:.2f} m, "
-            "empaquetado First Fit Decreasing)",
+            f"2. Sobrante de corte (plan optimizado con barras comerciales de {result.stock_length_mm / 1000:.2f} m; "
+            + (f"retal reutilizable desde {reusable / 1000:.2f} m)" if reusable > 0 else "sin retales reutilizables)"),
         )
         row = self._table(
             ws, row,
-            ["Barra", "Grado", "Barras comerciales", "Long. comprada (m)", "Long. útil (m)", "Desperdicio (m)",
-             "Desperdicio (kg)", "Desperdicio (%)", "Peso a comprar (kg)"],
+            ["Barra", "Grado", "Barras comerciales", "Long. comprada (m)", "Long. útil (m)", "Sobrante (m)",
+             "Sobrante (kg)", "Sobrante (%)", "Peso a comprar (kg)", "Retal reutilizable (m)", "Desperdicio definitivo (%)"],
             [[s.rebar.designation, s.rebar.grade.name, s.stock_bars, s.purchased_length_m, s.total_length_m,
-              s.waste_length_m, s.waste_weight_kg, s.waste_pct, s.purchase_weight_kg]
+              s.waste_length_m, s.waste_weight_kg, s.waste_pct, s.purchase_weight_kg, s.reusable_length_m, s.scrap_pct]
              for s in result.diameter_summaries],
-            ["@", "@", _FMT_MM, _FMT_2, _FMT_2, _FMT_2, _FMT_2, _FMT_PCT, _FMT_2],
+            ["@", "@", _FMT_MM, _FMT_2, _FMT_2, _FMT_2, _FMT_2, _FMT_PCT, _FMT_2, _FMT_2, _FMT_PCT],
             total=["TOTAL", None, sum(s.stock_bars for s in result.diameter_summaries),
                    sum(s.purchased_length_m for s in result.diameter_summaries), result.total_length_m,
                    sum(s.waste_length_m for s in result.diameter_summaries), result.total_waste_weight_kg,
-                   result.total_waste_pct, result.total_purchase_weight_kg],
+                   result.total_waste_pct, result.total_purchase_weight_kg,
+                   sum(s.reusable_length_m for s in result.diameter_summaries), result.total_scrap_pct],
         )
 
         # 3. Consolidado por nivel
@@ -248,7 +257,7 @@ class ExcelExporter:
             for rebar in rebars
         ]
         level_totals = [sum(by_level[level].values()) for level in result.levels]
-        self._table(
+        row = self._table(
             ws, row,
             ["Barra", *result.levels, "Total"],
             rows,
@@ -256,9 +265,88 @@ class ExcelExporter:
             total=["TOTAL", *level_totals, result.total_weight_kg],
         )
 
+        # 4. Longitud comercial recomendada
+        comparisons = stock_comparison(result)
+        if comparisons:
+            lengths = sorted({o.stock_length_mm for c in comparisons for o in c.options})
+            row = self._section(ws, row + 1, "4. Longitud comercial recomendada (barras · sobrante, con el plan optimizado de cada una)")
+            rows = []
+            for c in comparisons:
+                by_length = {o.stock_length_mm: o for o in c.options}
+                rows.append([c.summary.rebar.designation, c.summary.rebar.grade.name]
+                            + [f"{by_length[l].bars} · {by_length[l].waste_pct:.1%}" if l in by_length else "no caben" for l in lengths]
+                            + [f"{c.best_mm / 1000:.2f} m" if c.best_mm else "—"])
+            self._table(ws, row, ["Barra", "Grado", *[f"{l / 1000:.2f} m" for l in lengths], "Recomendada"], rows,
+                        ["@"] * (len(lengths) + 3), total=None)
+            n_cols = max(n_cols, len(lengths) + 3)
+
         ws.column_dimensions["A"].width = 20
         for c in range(2, n_cols + 1):
             ws.column_dimensions[get_column_letter(c)].width = 16
+        ws.sheet_view.showGridLines = False
+        _page_setup(ws, None)
+
+    # ------------------------------------------------------- hoja 3: plan de corte
+    def _write_plan(self, ws: Worksheet, result: BBSResult) -> None:
+        headers = ["Paso", "Barras N°", "Cant.", "Esquema de corte (m)", "Cortes (mm)", "Marcas", "Retal (mm)", "Uso del retal"]
+        n_cols = len(headers)
+        self._write_title_block(ws, n_cols, "PLAN Y SECUENCIA DE CORTE", result)
+        legend = ("Cada barra comercial se corta de izquierda a derecha; el tramo rayado final es el retal "
+                  "(verde: reutilizable, gris: desperdicio).")
+        ws.merge_cells(start_row=6, start_column=1, end_row=6, end_column=n_cols)
+        _style(ws.cell(6, 1, legend), _MUTED, Alignment(horizontal="left"))
+        row = 8
+        if not result.diameter_summaries:
+            ws.cell(row, 1, "Sin barras que cortar.")
+        for summary in result.diameter_summaries:
+            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=n_cols)
+            _style(ws.cell(row, 1, plan_title(summary)), _BOLD, _LEFT, fill=_BAND_FILL)
+            for c in range(2, n_cols + 1):
+                ws.cell(row, c).border = _BORDER
+            ws.row_dimensions[row].height = 20  # alturas fijas: así el programa no reajusta filas ni mueve las imágenes
+            row += 1
+            rows = plan_rows(summary)
+            if not rows:
+                ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=n_cols)
+                _style(ws.cell(row, 1, "Todas las piezas se suministran en rollo: no hay barras comerciales que cortar."),
+                       _BODY, _LEFT)
+                ws.row_dimensions[row].height = 20
+                row += 2
+                continue
+            for c, text in enumerate(headers, start=1):
+                _style(ws.cell(row, c, text), _HEADER_FONT, _CENTER, fill=_HEADER_FILL)
+            ws.row_dimensions[row].height = 24
+            row += 1
+            for item in rows:
+                values = [(item.step, _CENTER, None), (item.bars_text, _CENTER, None), (item.count, _CENTER, _FMT_MM),
+                          (None, _CENTER, None), (item.cuts_text, _LEFT, None), (item.marks_text, _LEFT, None),
+                          (item.remnant_mm, _RIGHT, _FMT_MM), (item.remnant_use, _CENTER, None)]
+                for c, (value, alignment, fmt) in enumerate(values, start=1):
+                    _style(ws.cell(row, c, value), _BODY, alignment, number_format=fmt)
+                ws.row_dimensions[row].height = _PLAN_ROW_HEIGHT_PT
+                image = XLImage(BytesIO(render_pattern_png(item.pattern, 2 * _PLAN_W, 2 * _PLAN_H, summary.reusable_remnant_mm)))
+                row_px = _PLAN_ROW_HEIGHT_PT * 96 / 72
+                image.anchor = OneCellAnchor(
+                    _from=AnchorMarker(col=3, colOff=pixels_to_EMU(4), row=row - 1,
+                                       rowOff=pixels_to_EMU(max(0, (row_px - _PLAN_H) / 2))),
+                    ext=XDRPositiveSize2D(pixels_to_EMU(_PLAN_W), pixels_to_EMU(_PLAN_H)),
+                )
+                ws.add_image(image)
+                row += 1
+            total_bars = summary.plan.stock_bars
+            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=2)
+            _style(ws.cell(row, 1, "Total"), _BOLD, _RIGHT, fill=_SUBTOTAL_FILL)
+            for c in range(3, n_cols + 1):
+                _style(ws.cell(row, c), _BOLD, _RIGHT, fill=_SUBTOTAL_FILL)
+            ws.cell(row, 3, total_bars).number_format = _FMT_MM
+            ws.merge_cells(start_row=row, start_column=5, end_row=row, end_column=n_cols)
+            ws.cell(row, 5, f"Sobrante {summary.waste_length_m:,.2f} m  ·  reutilizable {summary.reusable_length_m:,.2f} m  ·  "
+                            f"desperdicio {summary.scrap_length_m:,.2f} m").alignment = Alignment(horizontal="left", vertical="center")
+            ws.row_dimensions[row].height = 20
+            row += 2
+        widths = {1: 7, 2: 11, 3: 8, 4: 60, 5: 40, 6: 36, 7: 11, 8: 14}
+        for column, width in widths.items():
+            ws.column_dimensions[get_column_letter(column)].width = width
         ws.sheet_view.showGridLines = False
         _page_setup(ws, None)
 
@@ -269,7 +357,7 @@ class ExcelExporter:
 
     @staticmethod
     def _table(ws: Worksheet, row: int, headers: list[str], rows: list[list[object]], formats: list[str],
-               total: list[object]) -> int:
+               total: list[object] | None) -> int:
         for c, text in enumerate(headers, start=1):
             _style(ws.cell(row, c, text), _HEADER_FONT, _CENTER, fill=_HEADER_FILL)
         ws.row_dimensions[row].height = 30
@@ -278,9 +366,11 @@ class ExcelExporter:
             for c, (value, fmt) in enumerate(zip(values, formats), start=1):
                 _style(ws.cell(row, c, value), _BODY, _LEFT if c == 1 else _RIGHT, number_format=fmt)
             row += 1
-        for c, (value, fmt) in enumerate(zip(total, formats), start=1):
-            _style(ws.cell(row, c, value), _BOLD, _LEFT if c == 1 else _RIGHT, fill=_SUBTOTAL_FILL, number_format=fmt)
-        return row + 1
+        if total is not None:
+            for c, (value, fmt) in enumerate(zip(total, formats), start=1):
+                _style(ws.cell(row, c, value), _BOLD, _LEFT if c == 1 else _RIGHT, fill=_SUBTOTAL_FILL, number_format=fmt)
+            row += 1
+        return row
 
     # --------------------------------------------------------------- encabezado
     def _write_title_block(self, ws: Worksheet, n_cols: int, title: str, result: BBSResult) -> None:
