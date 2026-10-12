@@ -126,7 +126,7 @@ def render_sketch(sketch: Sketch, width: int, height: int, *, bar_color: tuple[i
 
     # Margen inicial pequeño; se agranda con cada texto que se saldría de la imagen.
     pad = {"l": 6.0 * ss, "r": 6.0 * ss, "t": 6.0 * ss, "b": 6.0 * ss}
-    for _ in range(6):
+    for _ in range(16):
         to_px = transform(pad)
         boxes = [item[0] for item in layout(to_px)]
         for box in sketch.boxes:  # el rectángulo de un coupler también debe caber en la imagen

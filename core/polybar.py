@@ -322,10 +322,19 @@ def _step(p: Point, v: Point, k: float = 1.0) -> Point:
     return p[0] + k * v[0], p[1] + k * v[1]
 
 
-def _hook_label(length: float | None, at: Point, outward: Point) -> list[DimLabel]:
-    if length is None:
+def hook_label_text(hooks: Sequence[HookInfo]) -> str:
+    """Texto del rótulo de gancho del dibujo: ángulo y extensión, ``"G 135° · 75"``.
+
+    Con ganchos distintos los lista en el orden de la barra (``"G 135° · 75 / 90° · 120"``); si son idénticos, uno solo.
+    """
+    parts = [f"{h.angle_deg:.0f}° · {format_dimension(h.extension_mm)}" for h in hooks]
+    return "G " + " / ".join(dict.fromkeys(parts))
+
+
+def _hook_label(hooks: Sequence[HookInfo], at: Point, outward: Point) -> list[DimLabel]:
+    if not hooks:
         return []
-    return [DimLabel(f"G {format_dimension(length)}", at, _unit(outward), kind="hook")]
+    return [DimLabel(hook_label_text(hooks), at, _unit(outward), kind="hook")]
 
 
 def _bisector(previous: Point, vertex: Point, following: Point) -> Point:
@@ -401,11 +410,13 @@ def open_polyline_sketch(code: str, poly: OpenPoly, rebar: Rebar | None) -> Sket
         for info, vertex, outward in ((result.start_hook, points[0], _dir(headings[0] + 180.0)),
                                       (result.end_hook, points[-1], _dir(headings[-1]))):
             if info is not None:
-                labels += _hook_label(info.extension_mm, vertex, outward)
+                labels += _hook_label([info], vertex, outward)
         if result.first_tail is not None:
-            labels += _hook_label(result.first_tail, points[0], (points[0][0] - points[1][0], points[0][1] - points[1][1]))
+            labels += _hook_label([HookInfo(abs(poly.angles[0]), result.first_tail)], points[0],
+                                  (points[0][0] - points[1][0], points[0][1] - points[1][1]))
         if result.last_tail is not None:
-            labels += _hook_label(result.last_tail, points[-1], (points[-1][0] - points[-2][0], points[-1][1] - points[-2][1]))
+            labels += _hook_label([HookInfo(abs(poly.angles[-1]), result.last_tail)], points[-1],
+                                  (points[-1][0] - points[-2][0], points[-1][1] - points[-2][1]))
     boxes = tuple(Box(end, outward, kind, COUPLER_CODES[kind])
                   for kind, end, outward in ((poly.coupler_start, points[0], headings[0] + 180.0),
                                              (poly.coupler_end, points[-1], headings[-1]))
@@ -468,11 +479,11 @@ def closed_polygon_sketch(code: str, poly: ClosedPoly, rebar: Rebar | None) -> S
             # El rótulo va fuera de la esquina de cierre, donde nacen los dos ganchos.
             centroid = (sum(p[0] for p in pts) / n, sum(p[1] for p in pts) / n)
             side = -1.0 if vertex[0] <= centroid[0] else 1.0
-            if abs(first.extension_mm - last.extension_mm) < 0.5:
-                labels += _hook_label(first.extension_mm, vertex, (side, 0.0))
-            else:  # extensiones distintas: un solo rótulo con el largo del gancho inicial y el del final, en ese orden
-                text = f"G {format_dimension(first.extension_mm)} / {format_dimension(last.extension_mm)}"
-                labels.append(DimLabel(text, vertex, (side, 0.0), kind="hook"))
+            if hook_label_text([first]) == hook_label_text([last]):
+                labels += _hook_label([first], vertex, (side, 0.0))
+            else:  # el del final junto al último lado (a la izquierda) y el del inicio junto al primero (abajo)
+                labels += _hook_label([last], vertex, (side, 0.0))
+                labels += _hook_label([first], vertex, (side, -1.0))
     return Sketch(paths=(path,), labels=tuple(labels))
 
 

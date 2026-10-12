@@ -35,7 +35,16 @@ from core.coupler import COUPLER_CHOICES
 from core.cutlength import CutLength
 from core.geometry import GeometryError
 from core.params import param
-from core.polybar import LETTERS, ClosedPoly, HookSpec, OpenPoly, hook_allowance, hook_tail, resolve_hook
+from core.polybar import (
+    LETTERS,
+    ClosedPoly,
+    HookSpec,
+    OpenPoly,
+    hook_allowance,
+    hook_label_text,
+    hook_tail,
+    resolve_hook,
+)
 from core.rebar import BendUse, Rebar
 from core.shape_codes import (
     HOOK_CHOICES,
@@ -411,12 +420,14 @@ class RingTie(ShapeCode):
             infos = [resolve_hook(rebar, _round_use(rebar), spec)[0] if spec else None for spec in self._specs()]
         except GeometryError:
             return []
-        present = [(info, tip) for info, tip in zip(infos, tips) if info is not None and tip is not None]
-        if len(present) == 2 and abs(present[0][0].extension_mm - present[1][0].extension_mm) < 0.5:
-            (info, a), (_, b) = present  # dos ganchos de igual largo: un solo rótulo (bajo ambos si nacen del mismo punto)
-            at = a if has_lap else ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
-            return [DimLabel(f"G {format_dimension(info.extension_mm)}", at, (0.0, -1.0), kind="hook")]
-        return [DimLabel(f"G {format_dimension(info.extension_mm)}", tip, (0.0, -1.0), kind="hook") for info, tip in present]
+        present = [info for info, tip in zip(infos, tips) if info is not None and tip is not None]
+        if not present:
+            return []
+        # Los rótulos van sobre el punto de cierre, fuera del aro (dentro no hay sitio para el texto): uno si los
+        # ganchos son iguales y, si no, uno por gancho apilados (el inicial abajo, el final encima).
+        if len({hook_label_text([info]) for info in present}) == 1:
+            present = present[:1]
+        return [DimLabel(hook_label_text([info]), (0.0, 1.0), (0.0, 1.0), kind="hook") for info in present]
 
 
 @register_shape
@@ -538,7 +549,7 @@ class Spiral(ShapeCode):
             else:
                 path.append(tip)
             if infos[slot] is not None:
-                labels.append(DimLabel(f"G {format_dimension(infos[slot].extension_mm)}", tip,
+                labels.append(DimLabel(hook_label_text([infos[slot]]), tip,
                                        (-1.0, 0.0) if slot == 0 else (1.0, 0.0), kind="hook"))
         return Sketch(paths=(tuple(path),), labels=tuple(labels))
 

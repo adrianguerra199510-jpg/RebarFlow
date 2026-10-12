@@ -96,7 +96,7 @@ trapezoidal (cota C, que no es un lado) se acota con una línea punteada.
 Hay **un solo estribo rectangular** (`E`): cada pata se configura por separado con *Gancho inicial* y *Gancho final* (90° o 135°) y
 su extensión (vacía = estándar de la norma), de modo que sirve para el estribo sísmico a 135°, el de 90° y el mixto de 135°/90°.
 Los estribos en U, triangular y trapezoidal tienen los mismos cuatro parámetros. Con extensiones distintas el dibujo rotula
-ambas (`G 75 / 120`, en el orden de la barra); el panel de detalle y el diálogo las detallan (`135° · 75 / 90° · 120`).
+cada una con su ángulo (`G 135° · 75` junto al último lado y `G 90° · 120` bajo el primero); el panel de detalle y el diálogo las detallan (`135° · 75 / 90° · 120`).
 
 El **aro circular** admite traslape (`B`, 0 si no hay) y un gancho de 90° o 135° en cada extremo, doblado hacia el interior:
 `L = π·(D − d) + traslape + Σ (φ·R + extensión)`. La **espiral** admite vueltas planas adicionales al inicio y al final por
@@ -109,8 +109,8 @@ separado (ACI 318 pide 1.5 en cada extremo) y los mismos ganchos. Un archivo gua
 
 ### Largo de los ganchos
 
-Cada gancho se anota con su **extensión recta** (la «pata» después del doblez): en el dibujo, como un rótulo ámbar
-`G 75`; y en el diálogo de la barra y el panel de detalle, como **Ganchos (° · mm)** (`2 × 135° · 75`, `90° · 152 / 180° · 65`).
+Cada gancho se anota con su **ángulo y su extensión recta** (la «pata» después del doblez): en el dibujo, como un rótulo ámbar
+`G 135° · 75` (uno por gancho si difieren; en un aro, sobre el punto de cierre); y en el diálogo de la barra y el panel de detalle, como **Ganchos (° · mm)** (`2 × 135° · 75`, `90° · 152 / 180° · 65`).
 Las tablas de la planilla no llevan columna de ganchos: el dibujo ya los rotula. Si la extensión queda bajo el mínimo de la norma,
 la marca sale en **rojo** (con el aviso en su ayuda emergente) y Excel y PDF listan el texto en un bloque *Avisos* bajo la
 planilla. Con una extensión vacía se usa la estándar.

@@ -426,15 +426,25 @@ def test_labels_follow_the_dimension_letters_not_the_drawing_order():
     assert dim_texts(CustomBar(legs=(1, 2, 3, 4), angles=(90, 90, 90))) == {"A=1", "B=2", "C=3", "D=4"}
 
 
-def test_hook_labels_for_both_legs():
-    assert hook_texts(Stirrup(220, 420), N3) == ["G 75"]  # extensiones iguales: un solo rótulo
-    assert hook_texts(Stirrup(220, 420, hook_start=135, hook_end=90), N3) == ["G 75"]
-    assert hook_texts(Stirrup(220, 420, ext_end=120), N3) == ["G 75 / 120"]
-    assert hook_texts(RingTie(400, lap=0, hook_start=135, hook_end=135), N3) == ["G 75"]
-    assert hook_texts(RingTie(400, lap=250, hook_end=90), N3) == ["G 75"]
+def test_hook_labels_show_the_angle_and_the_extension():
+    # ganchos iguales: un solo rótulo; distintos: uno por gancho (el del final junto al último lado, el del inicio abajo)
+    assert hook_texts(Stirrup(220, 420), N3) == ["G 135° · 75"]
+    assert hook_texts(Stirrup(220, 420, hook_start=90, hook_end=90), N3) == ["G 90° · 75"]
+    assert hook_texts(Stirrup(220, 420, hook_start=135, hook_end=90), N3) == ["G 90° · 75", "G 135° · 75"]
+    assert hook_texts(Stirrup(220, 420, ext_end=120), N3) == ["G 135° · 120", "G 135° · 75"]
+    assert hook_texts(TriStirrup(300, 300, 300, hook_start=90), N3) == ["G 135° · 75", "G 90° · 75"]
+    assert hook_texts(RingTie(400, lap=0, hook_start=135, hook_end=135), N3) == ["G 135° · 75"]
+    assert hook_texts(RingTie(400, lap=250, hook_end=90), N3) == ["G 90° · 75"]
+    assert hook_texts(RingTie(400, lap=250, hook_start=135, hook_end=90), N3) == ["G 135° · 75", "G 90° · 75"]
     assert hook_texts(RingTie(400, lap=250), N3) == []
-    assert hook_texts(Spiral(400, 75, 2000, hook_start=135, hook_end=90, ext_end=150), N4) == ["G 76", "G 150"]
+    assert hook_texts(Spiral(400, 75, 2000, hook_start=135, hook_end=90, ext_end=150), N4) == ["G 135° · 76", "G 90° · 150"]
     assert hook_texts(Spiral(400, 75, 2000), N4) == []
+    # barras: gancho explícito en cada punta y la pata de una L o de una U (doblez de 90°)
+    assert hook_texts(HookedBar(a=1800, hook_start=90, hook_end=180), N4) == ["G 90° · 152", "G 180° · 65"]
+    assert hook_texts(HookedBar(a=1800, hook_start=135, hook_end=0, ext_start=120), N4) == ["G 135° · 120"]
+    tail = f"{300 - (N5.bend_radius_mm() + N5.diameter_mm):.0f}"  # la pata recta: cota exterior menos la tangente del doblez
+    assert hook_texts(LBar(1200, 300), N5) == [f"G 90° · {tail}"]
+    assert hook_texts(UBar(600, 300, 300), N5) == [f"G 90° · {tail}", f"G 90° · {tail}"]
     assert hook_texts(Stirrup(220, 420), None) == []  # sin barra no se conoce el largo del gancho
 
 
@@ -544,3 +554,19 @@ def test_couplers_are_listed_in_the_summaries_and_the_header_legend(tmp_path):
     wb = load_workbook(ExcelExporter().export(BBSCalculator().calculate([plain]), tmp_path / "p.xlsx"))
     assert not any("Couplers" in str(c.value) for row in wb["Resumen"].iter_rows() for c in row)
     assert "RC =" not in wb["Planilla BBS"]["B4"].value
+
+
+@pytest.mark.parametrize("shape", [
+    Stirrup(220, 420, hook_start=90, hook_end=135), Stirrup(300, 400, hook_start=135, hook_end=90, ext_end=140),
+    TriStirrup(300, 300, 300, hook_start=90), TrapStirrup(400, 250, 300, hook_end=90),
+    UStirrup(300, 400, hook_start=90), RingTie(400, lap=0, hook_start=135, hook_end=90),
+    RingTie(400, lap=250, hook_start=135, hook_end=90), Spiral(400, 75, 2000, hook_start=90, hook_end=135),
+])
+def test_mixed_hook_labels_also_fit_inside_the_picture(shape):
+    from exporters.shape_images import BAR_COLOR, render_sketch
+
+    image = render_sketch(shape.sketch(N3), 320, 120)
+    width, height = image.size
+    border = [image.getpixel((x, y)) for x in range(width) for y in (0, height - 1)]
+    border += [image.getpixel((x, y)) for y in range(height) for x in (0, width - 1)]
+    assert not [p for p in border if p[3] > 60 and sum((a - b) ** 2 for a, b in zip(p[:3], BAR_COLOR[:3])) > 25**2]
