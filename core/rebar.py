@@ -1,8 +1,8 @@
 """Barras de refuerzo: propiedades, ganchos estándar, radios de doblez y catálogo.
 
 Los diámetros y masas del catálogo corresponden a barras corrugadas ASTM A615/A615M
-(#3 a #11, designación métrica suave 10M a 36M). El rango "10 mm a 32 mm" de uso
-corriente queda cubierto por #3 (10M) a #10 (32M); se incluye además #11 (36M).
+(#3 a #11 y #14, designación métrica suave 10M a 36M y 43M). El rango "10 mm a 32 mm" de
+uso corriente queda cubierto por #3 (10M) a #10 (32M); se incluyen además #11 (36M) y #14 (43M).
 
 Geometría de ganchos y diámetros mínimos de doblez según ACI 318-19 (Tablas 25.3.1 y
 25.3.2) y NSR-10 (C.7.1 y C.7.2). Verifique los valores contra la edición de la norma
@@ -145,7 +145,7 @@ class Rebar:
         """Diámetro interior mínimo de doblez.
 
         * ``MAIN``    (ACI 25.3.1): #3–#8 → 6d; #9–#11 → 8d; #14–#18 → 10d.
-        * ``STIRRUP`` (ACI 25.3.2): #3–#5 → 4d; #6–#8 → 6d. No se define para #9 o mayores.
+        * ``STIRRUP`` (ACI 25.3.2): #3–#5 → 4d; #6–#8 → 6d. No se define para #9 o mayores (tampoco #14).
         """
         n = self.bar_number
         if use is BendUse.MAIN:
@@ -203,6 +203,7 @@ _ASTM_A615: tuple[tuple[str, str, float, float], ...] = (
     ("#9", "29M", 28.650, 5.060),
     ("#10", "32M", 32.260, 6.404),
     ("#11", "36M", 35.810, 7.907),
+    ("#14", "43M", 43.000, 11.380),
 )
 
 REBAR_CATALOG: dict[str, Rebar] = {
@@ -212,7 +213,7 @@ REBAR_CATALOG: dict[str, Rebar] = {
 
 
 def register_rebar(rebar: Rebar, *, replace_existing: bool = False) -> None:
-    """Agrega una barra al catálogo (p. ej. #14, #18 o una serie métrica propia)."""
+    """Agrega una barra al catálogo (p. ej. #18 o una serie métrica propia)."""
     if rebar.designation in REBAR_CATALOG and not replace_existing:
         raise ValueError(f"{rebar.designation} ya existe en el catálogo.")
     REBAR_CATALOG[rebar.designation] = rebar

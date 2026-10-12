@@ -5,7 +5,7 @@ from io import BytesIO
 
 from core.element import ElementType, StructuralElement
 from core.rebar import get_rebar
-from core.shape_codes import Stirrup135, StraightBar, UBar
+from core.shape_codes import Stirrup, StraightBar, UBar
 from core.shape_templates import Spiral
 from engine.bbs_calculator import BBSCalculator
 from engine.cutting_optimizer import CutPattern
@@ -52,7 +52,7 @@ def test_plan_beats_the_previous_first_fit_on_the_sample():
 
 def test_spirals_come_from_coil_and_do_not_use_stock_bars():
     element = StructuralElement("C-9", ElementType.COLUMN, "Nivel 1", 2)
-    element.add_group("E1", N4, Stirrup135(320, 320), 10)
+    element.add_group("E1", N4, Stirrup(320, 320), 10)
     element.add_group("ES1", N4, Spiral(350, 75, 2000), 1)  # ~ 30 m: no cabe en una barra de 12 m
     result = BBSCalculator().calculate([element])
     (summary,) = result.diameter_summaries
@@ -153,9 +153,9 @@ def test_catalog_project_uses_every_builtin_template_and_exports(tmp_path):
     project = build_catalog_project()
     element = project.elements[0]
     assert element.element_type is ElementType.OTHER
-    assert {g.shape.code for g in element.groups} == {"R", "L", "U", "E", "E90", "G", "EU", "Z", "Q", "O", "ET", "ETR", "AR", "ES", "X"}
+    assert {g.shape.code for g in element.groups} == {"R", "L", "U", "E", "G", "EU", "Z", "Q", "O", "ET", "ETR", "AR", "ES", "X"}
     result = BBSCalculator(project.stock_length_mm, project.length_rounding_mm, project.reusable_remnant_mm).calculate(project.elements)
-    assert len(result.lines) == 16 and result.total_weight_kg > 0
+    assert len(result.lines) == 21 and result.total_weight_kg > 0
     assert not [w for line in result.lines for w in line.warnings]  # el ejemplo cumple los mínimos de la norma
     assert next(line for line in result.lines if line.mark == "ES1").shape.from_coil
     assert ExcelExporter(project.name).export(result, tmp_path / "c.xlsx").exists()

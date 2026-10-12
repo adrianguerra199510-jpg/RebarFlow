@@ -2,6 +2,8 @@
 
 Se organiza como el modelo de formas de Revit: cada forma es de **estilo** «barra» o «estribo/ligadura»
 (que decide el diámetro de doblez y los ganchos estándar) y sus extremos admiten ganchos de 90°, 135° o 180°.
+En todas las familias de estribos, aros y espirales el gancho del inicio y el del final se eligen por separado
+(ángulo y extensión), de modo que una misma plantilla cubre el estribo con patas a 135°, a 90° o mixtas.
 
 =======  ==============================================  ==========================================
 Código   Plantilla                                       Familia
@@ -9,17 +11,16 @@ Código   Plantilla                                       Familia
 ``R``    Recta                                           polilínea (en ``shape_codes``)
 ``L``    Bastón L                                        polilínea (en ``shape_codes``)
 ``U``    Gancho U                                        polilínea (en ``shape_codes``)
-``E``    Estribo 135°                                    polígono cerrado (en ``shape_codes``)
-``E90``  Estribo 90°                                     polígono cerrado (en ``shape_codes``)
+``E``    Estribo rectangular (patas de 90° o 135°)       polígono cerrado (en ``shape_codes``)
 ``G``    Barra con ganchos (0/90/135/180° en cada punta) polilínea
-``EU``   Estribo abierto en U con ganchos 90°/135°        polilínea
+``EU``   Estribo abierto en U (patas de 90° o 135°)      polilínea
 ``Z``    Barra en Z                                      polilínea
 ``Q``    Quiebre (barra con tramo inclinado)             polilínea
 ``O``    Omega (Ω)                                       polilínea
-``ET``   Estribo triangular                              polígono cerrado
-``ETR``  Estribo trapezoidal                             polígono cerrado
-``AR``   Aro circular con traslape                       geometría propia
-``ES``   Espiral                                         geometría propia
+``ET``   Estribo triangular (patas de 90° o 135°)        polígono cerrado
+``ETR``  Estribo trapezoidal (patas de 90° o 135°)       polígono cerrado
+``AR``   Aro circular (traslape y ganchos opcionales)    geometría propia
+``ES``   Espiral (vueltas extra y ganchos opcionales)    geometría propia
 ``X``    Personalizada (tramos y ángulos a mano)         polilínea
 =======  ==============================================  ==========================================
 """
@@ -33,23 +34,26 @@ from typing import ClassVar
 from core.cutlength import CutLength
 from core.geometry import GeometryError
 from core.params import param
-from core.polybar import LETTERS, ClosedPoly, HookSpec, OpenPoly
+from core.polybar import LETTERS, ClosedPoly, HookSpec, OpenPoly, hook_allowance, hook_tail, resolve_hook
 from core.rebar import BendUse, Rebar
-from core.shape_codes import ClosedPolyShape, OpenPolyShape, ShapeCode, register_shape
-from core.sketch import DimLabel, Sketch, format_dimension, proportional
-
-HOOK_CHOICES = ((0, "Sin gancho"), (90, "90°"), (135, "135°"), (180, "180°"))
-STIRRUP_HOOK_CHOICES = ((90, "90°"), (135, "135°"))
-STYLE_CHOICES = (("main", "Barra"), ("stirrup", "Estribo / ligadura"))
-SIDE_CHOICES = ((0, "Mismo lado"), (1, "Lados opuestos"))
+from core.shape_codes import (
+    HOOK_CHOICES,
+    RING_HOOK_CHOICES,
+    SIDE_CHOICES,
+    STIRRUP_HOOK_CHOICES,
+    STYLE_CHOICES,
+    ClosedPolyShape,
+    OpenPolyShape,
+    ShapeCode,
+    hook_spec as _hook,
+    migrate_single_hook,
+    register_shape,
+)
+from core.sketch import DimLabel, Sketch, dimension_text, format_dimension, proportional
 
 
 def _use(style: str) -> BendUse:
     return BendUse.STIRRUP if style == "stirrup" else BendUse.MAIN
-
-
-def _hook(angle: int, extension: float | None) -> HookSpec | None:
-    return HookSpec(float(angle), extension) if angle else None
 
 
 # ----------------------------------------------------------- polilíneas abiertas
@@ -85,23 +89,30 @@ class HookedBar(OpenPolyShape):
 @register_shape
 @dataclass(frozen=True)
 class UStirrup(OpenPolyShape):
-    """Estribo abierto en U (grapa) con ganchos de 90° o 135° en los extremos libres."""
+    """Estribo abierto en U (grapa) con una pata de 90° o 135° en cada extremo libre."""
 
     code: ClassVar[str] = "EU"
     name: ClassVar[str] = "Estribo en U"
-    description: ClassVar[str] = "Estribo abierto en U (grapa) con ganchos a 90° o 135° en las puntas."
+    description: ClassVar[str] = "Estribo abierto en U (grapa); cada punta con gancho de 90° o 135°."
 
     a: float = param("A · ancho exterior", default=300.0)
     b: float = param("B · alto exterior", default=400.0)
-    hook: int = param("Gancho de las puntas", "choice", 135, choices=STIRRUP_HOOK_CHOICES)
-    hook_extension_mm: float | None = param("Extensión del gancho", "length", None, optional=True)
+    hook_start: int = param("Gancho inicial", "choice", 135, choices=STIRRUP_HOOK_CHOICES)
+    ext_start: float | None = param("Extensión del gancho inicial", "length", None, optional=True)
+    hook_end: int = param("Gancho final", "choice", 135, choices=STIRRUP_HOOK_CHOICES)
+    ext_end: float | None = param("Extensión del gancho final", "length", None, optional=True)
+
+    @classmethod
+    def migrate(cls, parameters: dict[str, object]) -> dict[str, object]:
+        return migrate_single_hook(parameters)
 
     def dimensions(self) -> dict[str, float]:
         return {"A": self.a, "B": self.b}
 
     def poly(self) -> OpenPoly:
-        spec = HookSpec(float(self.hook), self.hook_extension_mm)
-        return OpenPoly((self.b, self.a, self.b), (90.0, 90.0), spec, spec, BendUse.STIRRUP, start_heading=-90.0)
+        return OpenPoly((self.b, self.a, self.b), (90.0, 90.0), _hook(self.hook_start, self.ext_start),
+                        _hook(self.hook_end, self.ext_end), BendUse.STIRRUP, start_heading=-90.0,
+                        names=("B", "A", "B"))
 
 
 @register_shape
@@ -184,7 +195,7 @@ class OmegaBar(OpenPolyShape):
 @register_shape
 @dataclass(frozen=True)
 class TriStirrup(ClosedPolyShape):
-    """Estribo triangular cerrado definido por sus tres lados exteriores, con ganchos de 90° o 135°."""
+    """Estribo triangular cerrado definido por sus tres lados exteriores, con patas de 90° o 135°."""
 
     code: ClassVar[str] = "ET"
     name: ClassVar[str] = "Estribo triangular"
@@ -193,8 +204,14 @@ class TriStirrup(ClosedPolyShape):
     a: float = param("A · lado 1", default=300.0)
     b: float = param("B · lado 2", default=300.0)
     c: float = param("C · lado 3", default=300.0)
-    hook: int = param("Gancho de cierre", "choice", 135, choices=STIRRUP_HOOK_CHOICES)
-    hook_extension_mm: float | None = param("Extensión del gancho", "length", None, optional=True)
+    hook_start: int = param("Gancho inicial", "choice", 135, choices=STIRRUP_HOOK_CHOICES)
+    ext_start: float | None = param("Extensión del gancho inicial", "length", None, optional=True)
+    hook_end: int = param("Gancho final", "choice", 135, choices=STIRRUP_HOOK_CHOICES)
+    ext_end: float | None = param("Extensión del gancho final", "length", None, optional=True)
+
+    @classmethod
+    def migrate(cls, parameters: dict[str, object]) -> dict[str, object]:
+        return migrate_single_hook(parameters)
 
     def validate(self) -> None:
         a, b, c = self.a, self.b, self.c
@@ -215,13 +232,17 @@ class TriStirrup(ClosedPolyShape):
 
     def poly(self) -> ClosedPoly:
         turns = tuple(180.0 - angle for angle in self.interior_angles())
-        return ClosedPoly((self.a, self.b, self.c), turns, HookSpec(float(self.hook), self.hook_extension_mm))
+        return ClosedPoly((self.a, self.b, self.c), turns, HookSpec(float(self.hook_start), self.ext_start),
+                          HookSpec(float(self.hook_end), self.ext_end), names=("A", "B", "C"))
 
 
 @register_shape
 @dataclass(frozen=True)
 class TrapStirrup(ClosedPolyShape):
-    """Estribo trapezoidal cerrado (trapecio isósceles) con ganchos de 90° o 135°."""
+    """Estribo trapezoidal cerrado (trapecio isósceles) con patas de 90° o 135°.
+
+    Cotas: A = base mayor, B = base menor, C = altura (acotada con una línea punteada) y D = lado inclinado.
+    """
 
     code: ClassVar[str] = "ETR"
     name: ClassVar[str] = "Estribo trapezoidal"
@@ -230,8 +251,14 @@ class TrapStirrup(ClosedPolyShape):
     bottom: float = param("A · base mayor", default=400.0)
     top: float = param("B · base menor", default=250.0)
     height: float = param("C · altura", default=300.0)
-    hook: int = param("Gancho de cierre", "choice", 135, choices=STIRRUP_HOOK_CHOICES)
-    hook_extension_mm: float | None = param("Extensión del gancho", "length", None, optional=True)
+    hook_start: int = param("Gancho inicial", "choice", 135, choices=STIRRUP_HOOK_CHOICES)
+    ext_start: float | None = param("Extensión del gancho inicial", "length", None, optional=True)
+    hook_end: int = param("Gancho final", "choice", 135, choices=STIRRUP_HOOK_CHOICES)
+    ext_end: float | None = param("Extensión del gancho final", "length", None, optional=True)
+
+    @classmethod
+    def migrate(cls, parameters: dict[str, object]) -> dict[str, object]:
+        return migrate_single_hook(parameters)
 
     def dimensions(self) -> dict[str, float]:
         return {"A": self.bottom, "B": self.top, "C": self.height, "D": self.leg()}
@@ -248,7 +275,19 @@ class TrapStirrup(ClosedPolyShape):
         beta = self.base_angle()
         return ClosedPoly((self.bottom, self.leg(), self.top, self.leg()),
                           (180.0 - beta, beta, beta, 180.0 - beta),
-                          HookSpec(float(self.hook), self.hook_extension_mm))
+                          HookSpec(float(self.hook_start), self.ext_start), HookSpec(float(self.hook_end), self.ext_end),
+                          names=("A", "", "B", "D"))
+
+    def sketch(self, rebar: Rebar | None = None) -> Sketch:
+        base = super().sketch(rebar)
+        # La altura C no es un lado: se acota con una línea punteada vertical, fuera del trapecio y con sus líneas de
+        # referencia, a la derecha (el lado inclinado izquierdo es el que lleva el rótulo D).
+        extent = max(self.bottom, self.height)
+        right, h = self.bottom / extent + 0.12, self.height / extent
+        top_right = (self.bottom + self.top) / 2.0 / extent
+        guides = (((right, 0.0), (right, h)), ((self.bottom / extent, 0.0), (right, 0.0)), ((top_right, h), (right, h)))
+        label = DimLabel(dimension_text("C", self.height), (right, h / 2.0), (1.0, 0.0))
+        return Sketch(base.paths, (*base.labels, label), (*base.guides, *guides))
 
 
 # ----------------------------------------------------------- geometría propia
@@ -263,124 +302,233 @@ def _round_use(rebar: Rebar) -> BendUse:
     return BendUse.STIRRUP if rebar.bar_number <= 8 else BendUse.MAIN
 
 
+def _min_diameter_check(code: str, rebar: Rebar, diameter: float, use: BendUse) -> None:
+    minimum = rebar.bend_diameter_mm(use) + 2.0 * rebar.diameter_mm
+    if diameter < minimum - 1e-6:
+        raise GeometryError(
+            f"Forma {code} con {rebar.designation}: el diámetro A = {diameter:g} mm es menor que el "
+            f"mínimo geométrico de {minimum:.1f} mm (Ø de doblez + 2 diámetros de barra)."
+        )
+
+
 @register_shape
 @dataclass(frozen=True)
 class RingTie(ShapeCode):
-    """Aro circular (estribo circular) cerrado con traslape. Equivale al código 75 de BS 8666.
+    """Aro circular (estribo circular) de una vuelta, cerrado con traslape y/o con ganchos de 90° o 135°.
 
-    ``diameter`` es el diámetro exterior (de cara exterior a cara exterior) y ``lap`` el traslape.
-    Longitud al eje: ``π·(D − d) + lap``.
+    ``diameter`` es el diámetro exterior (de cara exterior a cara exterior), ``lap`` el traslape (0 si los
+    extremos solo se cierran con ganchos) y ``hook_start``/``hook_end`` el gancho de cada extremo, que se
+    dobla hacia el interior del aro. Longitud al eje::
+
+        L = π·(D − d) + traslape + Σ (φ·R + extensión)
+
+    Sin ganchos equivale al código 75 de BS 8666.
     """
 
     code: ClassVar[str] = "AR"
     name: ClassVar[str] = "Aro circular"
-    description: ClassVar[str] = "Estribo circular de una vuelta con traslape (columnas circulares, pilotes)."
+    description: ClassVar[str] = (
+        "Estribo circular de una vuelta, cerrado con traslape y/o con ganchos de 90° o 135° en los extremos "
+        "(columnas circulares, pilotes). Con ganchos en ambos extremos ponga traslape 0."
+    )
 
     diameter: float = param("A · diámetro exterior", default=400.0)
-    lap: float = param("B · traslape", default=250.0)
+    lap: float = param("B · traslape", "length", 250.0, minimum=0.0)
+    hook_start: int = param("Gancho inicial", "choice", 0, choices=RING_HOOK_CHOICES)
+    ext_start: float | None = param("Extensión del gancho inicial", "length", None, optional=True)
+    hook_end: int = param("Gancho final", "choice", 0, choices=RING_HOOK_CHOICES)
+    ext_end: float | None = param("Extensión del gancho final", "length", None, optional=True)
 
     def dimensions(self) -> dict[str, float]:
         return {"A": self.diameter, "B": self.lap}
 
+    def _specs(self) -> tuple[HookSpec | None, HookSpec | None]:
+        return _hook(self.hook_start, self.ext_start), _hook(self.hook_end, self.ext_end)
+
     def cut_length(self, rebar: Rebar) -> CutLength:
         d = rebar.diameter_mm
         use = _round_use(rebar)
-        minimum = rebar.bend_diameter_mm(use) + 2.0 * d
-        if self.diameter < minimum - 1e-6:
-            raise GeometryError(
-                f"Forma {self.code} con {rebar.designation}: el diámetro A = {self.diameter:g} mm es menor que el "
-                f"mínimo geométrico de {minimum:.1f} mm (Ø de doblez + 2 diámetros de barra)."
-            )
-        perimeter = math.pi * self.diameter
+        _min_diameter_check(self.code, rebar, self.diameter, use)
+        hooks = hook_allowance(rebar, use, self._specs())
+        notes = []
+        if self.lap > 0:
+            notes.append(f"Traslape {self.lap:.0f} mm")
+        notes.append(f"Ø interior mínimo {rebar.bend_diameter_mm(use):.0f} mm")
         return CutLength(
-            dimension_sum_mm=perimeter + self.lap,
-            bend_adjustment_mm=-math.pi * d,
-            notes=(f"Traslape {self.lap:.0f} mm · Ø interior mínimo {rebar.bend_diameter_mm(use):.0f} mm",),
+            dimension_sum_mm=math.pi * self.diameter + self.lap,
+            bend_adjustment_mm=-math.pi * d + hooks.arc_mm,
+            extension_mm=hooks.extension_mm,
+            notes=(" · ".join(notes),),
+            warnings=hooks.warnings,
+            hooks=hooks.infos,
         )
 
     def sketch(self, rebar: Rebar | None = None) -> Sketch:
-        lap_deg = max(25.0, min(90.0, 360.0 * self.lap / (math.pi * self.diameter)))
-        start = 90.0
-        outer = _arc((0.0, 0.0), 1.0, start, start + 360.0)
-        inner = _arc((0.0, 0.0), 0.8, start, start + lap_deg, 16)
-        middle = math.radians(start + lap_deg / 2.0)
-        return Sketch(
-            paths=(outer, inner),
-            labels=(
-                DimLabel(f"D {format_dimension(self.diameter)}", (0.0, -1.0), (0.0, -1.0)),
-                DimLabel(f"T {format_dimension(self.lap)}", (math.cos(middle), math.sin(middle)),
-                         (math.cos(middle), math.sin(middle)), kind="hook"),
-            ),
-        )
+        start, tail = 90.0, 0.26
+        lap_deg = max(25.0, min(90.0, 360.0 * self.lap / (math.pi * self.diameter))) if self.lap > 0 else 0.0
+        outer = list(_arc((0.0, 0.0), 1.0, start, start + 360.0, 96))
+        inner = list(_arc((0.0, 0.0), 0.8, start, start + lap_deg, 16)) if lap_deg else []
+        labels = [DimLabel(dimension_text("A", self.diameter), (0.0, 0.0), (0.0, -1.0))]
+        if lap_deg:  # el traslape se rotula fuera del aro, a la izquierda de su punto medio
+            middle = math.radians(start + lap_deg / 2.0)
+            labels.append(DimLabel(dimension_text("B", self.lap), (1.08 * math.cos(middle), 1.08 * math.sin(middle)),
+                                   (-1.0, 0.0)))
+
+        # Ganchos: el del inicio sale del punto de partida; el del final, del extremo del traslape (o del mismo punto).
+        top = (0.0, 1.0)
+        tips: list[tuple[float, float] | None] = [None, None]
+        if self.hook_start:
+            tips[0] = hook_tail(top, 180.0, float(self.hook_start), True, tail)
+            outer.insert(0, tips[0])
+        if self.hook_end:
+            if lap_deg:
+                angle = math.radians(start + lap_deg)
+                end_point, heading = (0.8 * math.cos(angle), 0.8 * math.sin(angle)), start + lap_deg + 90.0
+                tips[1] = hook_tail(end_point, heading, float(self.hook_end), False, tail)
+                inner.append(tips[1])
+            else:
+                tips[1] = hook_tail(top, 180.0, float(self.hook_end), False, tail)
+                outer.append(tips[1])
+        if rebar is not None and any(tips):
+            labels += self._hook_labels(rebar, tips, bool(lap_deg))
+        paths = (tuple(outer), tuple(inner)) if inner else (tuple(outer),)
+        return Sketch(paths=paths, labels=tuple(labels), guides=(((-1.0, 0.0), (1.0, 0.0)),))
+
+    def _hook_labels(self, rebar: Rebar, tips: list, has_lap: bool) -> list[DimLabel]:
+        try:
+            infos = [resolve_hook(rebar, _round_use(rebar), spec)[0] if spec else None for spec in self._specs()]
+        except GeometryError:
+            return []
+        present = [(info, tip) for info, tip in zip(infos, tips) if info is not None and tip is not None]
+        if len(present) == 2 and abs(present[0][0].extension_mm - present[1][0].extension_mm) < 0.5:
+            (info, a), (_, b) = present  # dos ganchos de igual largo: un solo rótulo (bajo ambos si nacen del mismo punto)
+            at = a if has_lap else ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+            return [DimLabel(f"G {format_dimension(info.extension_mm)}", at, (0.0, -1.0), kind="hook")]
+        return [DimLabel(f"G {format_dimension(info.extension_mm)}", tip, (0.0, -1.0), kind="hook") for info, tip in present]
 
 
 @register_shape
 @dataclass(frozen=True)
 class Spiral(ShapeCode):
-    """Espiral (hélice) con vueltas de anclaje en los extremos.
+    """Espiral (hélice) con vueltas planas adicionales y ganchos opcionales en los extremos.
 
     ``diameter`` es el diámetro exterior, ``pitch`` el paso y ``height`` la altura exterior total. Con
-    ``N = (H − d)/p`` vueltas de trabajo y ``extra_turns`` vueltas planas de anclaje en cada extremo
-    (ACI 318: 1.5)::
+    ``N = (H − d)/p`` vueltas de trabajo y ``turns_start``/``turns_end`` vueltas planas adicionales (sin paso) al
+    inicio y al final (ACI 318 pide 1.5 en cada extremo)::
 
-        L = N·√((π·(D − d))² + p²) + 2·extra_turns·π·(D − d)
+        L = N·√((π·(D − d))² + p²) + (turns_start + turns_end)·π·(D − d) + Σ (φ·R + extensión)
+
+    Cada extremo admite además un gancho de 90° o 135°, que se dobla hacia el núcleo.
     """
 
     code: ClassVar[str] = "ES"
     name: ClassVar[str] = "Espiral"
     from_coil: ClassVar[bool] = True
-    description: ClassVar[str] = "Hélice continua con vueltas de anclaje (refuerzo transversal de columnas circulares)."
+    description: ClassVar[str] = (
+        "Hélice continua con vueltas adicionales al inicio y al final y ganchos opcionales de 90° o 135° "
+        "(refuerzo transversal de columnas circulares)."
+    )
 
     diameter: float = param("A · diámetro exterior", default=400.0)
     pitch: float = param("B · paso", default=75.0)
     height: float = param("C · altura", default=2000.0)
-    extra_turns: float = param("Vueltas de anclaje por extremo", "number", 1.5, minimum=0.0, maximum=5.0)
+    turns_start: float = param("Vueltas adicionales al inicio", "number", 1.5, minimum=0.0, maximum=5.0)
+    turns_end: float = param("Vueltas adicionales al final", "number", 1.5, minimum=0.0, maximum=5.0)
+    hook_start: int = param("Gancho inicial", "choice", 0, choices=RING_HOOK_CHOICES)
+    ext_start: float | None = param("Extensión del gancho inicial", "length", None, optional=True)
+    hook_end: int = param("Gancho final", "choice", 0, choices=RING_HOOK_CHOICES)
+    ext_end: float | None = param("Extensión del gancho final", "length", None, optional=True)
+
+    @classmethod
+    def migrate(cls, parameters: dict[str, object]) -> dict[str, object]:
+        migrated = dict(parameters)
+        if "extra_turns" in migrated:  # antes: las mismas vueltas de anclaje en ambos extremos
+            turns = migrated.pop("extra_turns")
+            migrated.setdefault("turns_start", turns)
+            migrated.setdefault("turns_end", turns)
+        return migrated
 
     def dimensions(self) -> dict[str, float]:
         return {"A": self.diameter, "B": self.pitch, "C": self.height}
 
     def turns(self, rebar: Rebar) -> float:
+        """Vueltas de trabajo (con paso) entre las vueltas adicionales de los extremos."""
         return (self.height - rebar.diameter_mm) / self.pitch
+
+    def _specs(self) -> tuple[HookSpec | None, HookSpec | None]:
+        return _hook(self.hook_start, self.ext_start), _hook(self.hook_end, self.ext_end)
 
     def cut_length(self, rebar: Rebar) -> CutLength:
         d = rebar.diameter_mm
         use = _round_use(rebar)
-        minimum = rebar.bend_diameter_mm(use) + 2.0 * d
-        if self.diameter < minimum - 1e-6:
-            raise GeometryError(
-                f"Forma {self.code} con {rebar.designation}: el diámetro A = {self.diameter:g} mm es menor que el "
-                f"mínimo geométrico de {minimum:.1f} mm (Ø de doblez + 2 diámetros de barra)."
-            )
+        _min_diameter_check(self.code, rebar, self.diameter, use)
         if self.pitch <= d:
             raise GeometryError(f"Forma {self.code}: el paso {self.pitch:g} mm debe ser mayor que el diámetro de la barra ({d:g} mm).")
         n = self.turns(rebar)
         if n < 1.0 - 1e-9:
             raise GeometryError(f"Forma {self.code}: la altura {self.height:g} mm no alcanza para una vuelta de paso {self.pitch:g} mm.")
+        hooks = hook_allowance(rebar, use, self._specs())
         centre = math.pi * (self.diameter - d)
-        total = n * math.hypot(centre, self.pitch) + 2.0 * self.extra_turns * centre
+        flat = (self.turns_start + self.turns_end) * centre
+        total = n * math.hypot(centre, self.pitch) + flat
         clear = self.pitch - d
-        warnings = ()
+        warnings = list(hooks.warnings)
         if clear < 25.0 - 1e-9 or clear > 75.0 + 1e-9:
-            warnings = (f"Separación libre {clear:.0f} mm fuera del rango 25–75 mm (ACI 318 25.7.3.1)",)
+            warnings.insert(0, f"Separación libre {clear:.0f} mm fuera del rango 25–75 mm (ACI 318 25.7.3.1)")
         return CutLength(
             dimension_sum_mm=total,
-            notes=(f"{n:.1f} vueltas + 2 × {self.extra_turns:g} de anclaje · Ø interior mínimo {rebar.bend_diameter_mm(use):.0f} mm",),
-            warnings=warnings,
+            bend_adjustment_mm=hooks.arc_mm,
+            extension_mm=hooks.extension_mm,
+            notes=(
+                f"{n:.1f} vueltas + {self.turns_start:g} al inicio y {self.turns_end:g} al final"
+                f" · Ø interior mínimo {rebar.bend_diameter_mm(use):.0f} mm",
+            ),
+            warnings=tuple(warnings),
+            hooks=hooks.infos,
         )
 
     def sketch(self, rebar: Rebar | None = None) -> Sketch:
-        width, height = proportional([self.diameter, self.height], 0.45)
-        turns, steps = 4, 160
-        points = tuple((width / 2.0 * (1.0 + math.cos(2.0 * math.pi * turns * k / steps)), height * k / steps)
-                       for k in range(steps + 1))
-        return Sketch(
-            paths=(points,),
-            labels=(
-                DimLabel(f"D {format_dimension(self.diameter)}", (width / 2.0, 0.0), (0.0, -1.0)),
-                DimLabel(f"H {format_dimension(self.height)}", (width, height / 2.0), (1.0, 0.0)),
-                DimLabel(f"p {format_dimension(self.pitch)}", (0.0, height / 2.0), (-1.0, 0.0), kind="hook"),
-            ),
-        )
+        width, height = proportional([self.diameter, self.height], 0.6)
+        turns, steps, tail = 4.5, 180, 0.15
+        # La hélice sube del extremo izquierdo al derecho; las vueltas adicionales se dibujan como anillos planos.
+        helix = tuple((width / 2.0 * (1.0 - math.cos(2.0 * math.pi * turns * k / steps)), height * k / steps)
+                      for k in range(steps + 1))
+        bottom = ((0.0, 0.0), (width, 0.0), (0.0, 0.0)) if self.turns_start > 0 else ()
+        top = ((width, height), (0.0, height), (width, height)) if self.turns_end > 0 else ()
+        path = [*bottom, *helix, *top]
+        labels = [
+            DimLabel(dimension_text("A", self.diameter), (width / 2.0, 0.0), (0.0, -1.0)),
+            DimLabel(dimension_text("B", self.pitch), (0.0, height / 2.0), (-1.0, 0.0)),
+            DimLabel(dimension_text("C", self.height), (width, height / 2.0), (1.0, 0.0)),
+        ]
+        if self.turns_start > 0:
+            labels.append(DimLabel(f"+{self.turns_start:g} vueltas", (width, 0.0), (1.0, 0.0), kind="angle"))
+        if self.turns_end > 0:
+            labels.append(DimLabel(f"+{self.turns_end:g} vueltas", (0.0, height), (-1.0, 0.0), kind="angle"))
+
+        # Los ganchos se esbozan hacia afuera de los extremos (el esquema es una elevación: no muestra el plano del anillo).
+        infos: list = [None, None]
+        if rebar is not None:
+            try:
+                infos = [resolve_hook(rebar, _round_use(rebar), spec)[0] if spec else None for spec in self._specs()]
+            except GeometryError:
+                infos = [None, None]
+        for slot, (angle, anchor, direction) in enumerate((
+            (self.hook_start, (0.0, 0.0), lambda phi: 360.0 - phi),
+            (self.hook_end, (width, height), lambda phi: 180.0 - phi),
+        )):
+            if not angle:
+                continue
+            heading = math.radians(direction(float(angle)))
+            tip = (anchor[0] + tail * math.cos(heading), anchor[1] + tail * math.sin(heading))
+            if slot == 0:
+                path.insert(0, tip)
+            else:
+                path.append(tip)
+            if infos[slot] is not None:
+                labels.append(DimLabel(f"G {format_dimension(infos[slot].extension_mm)}", tip,
+                                       (-1.0, 0.0) if slot == 0 else (1.0, 0.0), kind="hook"))
+        return Sketch(paths=(tuple(path),), labels=tuple(labels))
 
 
 # ------------------------------------------------------------------ personalizada

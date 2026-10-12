@@ -418,7 +418,7 @@ class BarDialog(QDialog):
             spin.setRange(spec.minimum if spec.minimum is not None else 0.01, spec.maximum if spec.maximum is not None else 100_000)
         else:  # length
             spin.setDecimals(1)
-            spin.setRange(0 if spec.optional else 0.1, _MAX_DIMENSION_MM)
+            spin.setRange(spec.minimum if spec.minimum is not None else (0 if spec.optional else 0.1), _MAX_DIMENSION_MM)
             spin.setSuffix(" mm")
             if spec.optional:
                 spin.setSpecialValueText("estándar (según norma)")

@@ -1,7 +1,7 @@
 # RebarFlow
 
 Planillas de despiece de acero de refuerzo (Bar Bending Schedule, BBS) en Python: interfaz gráfica de escritorio, un
-catálogo de 15 plantillas de forma (más formas dibujadas a mano), cálculo de longitudes de corte, pesos y largo de
+catálogo de 14 plantillas de forma (una de ellas para formas dibujadas a mano), cálculo de longitudes de corte, pesos y largo de
 ganchos, **plan y secuencia de corte optimizados** para reducir el desperdicio, y exportación a **Excel** y **PDF** con el
 dibujo de cada barra.
 
@@ -22,7 +22,7 @@ Para usar solo el motor y los exportadores (sin interfaz) basta `pip install -e 
 ```python
 from core.element import ElementType, StructuralElement
 from core.rebar import get_rebar
-from core.shape_codes import Stirrup135, UBar
+from core.shape_codes import Stirrup, UBar
 from core.shape_templates import CrankBar
 from engine.bbs_calculator import BBSCalculator
 from exporters.excel_exporter import ExcelExporter
@@ -32,7 +32,7 @@ viga = StructuralElement("V-101", ElementType.BEAM, "Nivel 1", quantity=4)
 n3, n4, n6 = get_rebar("#3"), get_rebar("#4"), get_rebar("#6")
 viga.add_group("A2", n6, UBar.with_standard_hooks(n6, a=5500), 2, "Refuerzo superior")
 viga.add_group("A3", n4, CrankBar(a=900, b=350, c=900, angle=45), 6, "Barra levantada")
-viga.add_group("E1", n3, Stirrup135(220, 420), 38, "Estribos")
+viga.add_group("E1", n3, Stirrup(220, 420), 38, "Estribos")
 
 resultado = BBSCalculator(stock_length_mm=12_000).calculate([viga])
 ExcelExporter(project_name="Mi proyecto").export(resultado, "planilla.xlsx")
@@ -59,7 +59,8 @@ captura y escribe `self-test.txt` con el resultado; sirve para comprobar un `.ex
 
 El catálogo sigue el modelo de formas de Revit: cada forma es de **estilo** «barra» o «estribo/ligadura» (decide el diámetro
 de doblez y los ganchos estándar) y sus extremos admiten ganchos de **90°, 135° o 180°**. En la interfaz se elige de una
-galería con miniatura, y el formulario se genera solo a partir de los parámetros de cada plantilla.
+galería con miniatura, y el formulario se genera solo a partir de los parámetros de cada plantilla. Las barras van de la
+**#3 a la #11 y la #14** (ASTM A615, Ø43 mm, 11.38 kg/m).
 
 ![Galería de plantillas](docs/ui_plantillas.png)
 
@@ -69,19 +70,42 @@ galería con miniatura, y el formulario se genera solo a partir de los parámetr
 | `L` | Bastón L | un doblez a 90°; la pata corta se informa como gancho |
 | `U` | Gancho U | dos dobleces a 90° del mismo lado |
 | `G` | **Barra con ganchos** | 0°, 90°, 135° o 180° en cada punta; mismo lado u opuestos; estilo barra o estribo |
-| `E` / `E90` | **Estribo rectangular cerrado** | ganchos a 135° (sísmico) o a 90° |
-| `EU` | **Estribo abierto en U** | ganchos a 90° o 135° en las puntas |
+| `E` | **Estribo rectangular cerrado** | un solo estribo; cada pata (gancho inicial y final) a 90° o 135°, con su propia extensión |
+| `EU` | **Estribo abierto en U** | cada punta a 90° o 135° |
 | `Z` | **Barra en Z** | dos dobleces a 90° en sentidos opuestos |
 | `Q` | **Quiebre** | tramo inclinado a 5°–85° (barra levantada) |
 | `O` | **Omega (Ω)** | ala, pata, tramo superior, pata y ala |
-| `ET` / `ETR` | **Estribo triangular / trapezoidal** | ángulos internos distintos de 90°; ganchos a 90° o 135° |
-| `AR` | **Aro circular** | con traslape; coincide con el código 75 de BS 8666 |
-| `ES` | **Espiral** | hélice con vueltas de anclaje; se suministra en rollo |
+| `ET` / `ETR` | **Estribo triangular / trapezoidal** | ángulos internos distintos de 90°; cada pata a 90° o 135° |
+| `AR` | **Aro circular** | traslape y/o ganchos de 90° o 135° en cada extremo; sin ganchos coincide con el código 75 de BS 8666 |
+| `ES` | **Espiral** | vueltas adicionales al inicio y al final por separado, ganchos de 90° o 135° en cada extremo; se suministra en rollo |
 | `X` | **Personalizada** | tramos y ángulos definidos a mano |
 
 > Se buscó el catálogo numerado de formas de Revit pero no se pudo consultar (la búsqueda solo devolvió la
 > documentación de su API); el conjunto sigue su modelo (estilos barra/estribo, ganchos 0/90/135/180°, espiral y círculo
 > con traslape) y las familias habituales de BS 8666 y ACI. Agregar otra forma toma pocas líneas (ver más abajo).
+
+### Referencia de las cotas en el dibujo
+
+Cada cota del esquema lleva su **letra de referencia** (`A=400`, `B=300`…), la misma que encabeza su columna en la planilla,
+el panel de detalle y los formularios. Una cota repetida (los lados iguales de un estribo) se rotula una sola vez; los ángulos
+internos distintos de 90° van en gris (`60°`) y las vueltas adicionales de una espiral como `+1.5 vueltas`. La altura del estribo
+trapezoidal (cota C, que no es un lado) se acota con una línea punteada.
+
+### Estribos, aros y espirales: ganchos en cada extremo
+
+Hay **un solo estribo rectangular** (`E`): cada pata se configura por separado con *Gancho inicial* y *Gancho final* (90° o 135°) y
+su extensión (vacía = estándar de la norma), de modo que sirve para el estribo sísmico a 135°, el de 90° y el mixto de 135°/90°.
+Los estribos en U, triangular y trapezoidal tienen los mismos cuatro parámetros. Con extensiones distintas el dibujo rotula
+ambas (`G 75 / 120`) y la columna *Ganchos* las separa (`135° · 75 / 90° · 120`).
+
+El **aro circular** admite traslape (`B`, 0 si no hay) y un gancho de 90° o 135° en cada extremo, doblado hacia el interior:
+`L = π·(D − d) + traslape + Σ (φ·R + extensión)`. La **espiral** admite vueltas planas adicionales al inicio y al final por
+separado (ACI 318 pide 1.5 en cada extremo) y los mismos ganchos. Un archivo guardado con el estribo `E90` o con un solo
+`hook` se abre sin cambios: se convierte al estribo único.
+
+| Estribo con patas distintas | Aro con ganchos | Espiral con vueltas y ganchos |
+|---|---|---|
+| ![Estribo](docs/ui_dialogo_estribo.png) | ![Aro](docs/ui_dialogo_aro.png) | ![Espiral](docs/ui_dialogo_espiral.png) |
 
 ### Largo de los ganchos
 
@@ -168,12 +192,12 @@ despiece. El mismo renderizador (`exporters/shape_images.py`) alimenta Excel, PD
 ```
 core/
   geometry.py       GeometryError y fórmulas de doblez (tangente, arco, deducción)
-  rebar.py          Rebar, SteelGrade, ganchos estándar, radios de doblez y catálogo #3–#11
+  rebar.py          Rebar, SteelGrade, ganchos estándar, radios de doblez y catálogo #3–#11 y #14
   cutlength.py      CutLength (desglose del cálculo) y HookInfo (largo de cada gancho)
   params.py         parámetros de una forma (tipo, límites, opciones): validación y formularios
   polybar.py        motor: polilínea abierta con ganchos y polígono cerrado con ganchos (longitud y esquema)
-  sketch.py         esquemas independientes del medio de dibujo
-  shape_codes.py    ShapeCode + registro extensible; R, L, U, E, E90
+  sketch.py         esquemas independientes del medio de dibujo (trazos, rótulos con su letra, líneas de cota)
+  shape_codes.py    ShapeCode + registro extensible (con migración de códigos antiguos); R, L, U, E
   shape_templates.py  G, EU, Z, Q, O, ET, ETR, AR, ES, X
   element.py        RebarGroup (marca), StructuralElement (nivel, tipo, cantidad)
   project.py        Project: elementos + parámetros de cálculo e impresión
@@ -211,13 +235,15 @@ sentido `core ← engine ← exporters ← gui`.
   Para 90° con `D = 6d` la deducción equivale a ≈ 2.5d y coincide con BS 8666 código 11 (`L = A + B − 0.5r − d`). El resultado no depende
   de hacia qué lado gire cada doblez.
 * **Ganchos**: la cota del tramo llega hasta el punto más exterior del arco, `(r + d)·sin(min(θ, 90°))`; la extensión se suma aparte.
-* **Estribos cerrados**: los dos ganchos nacen en el vértice de cierre. Rectangular a 135°: `2(a+b) + [(3π − 8)·R − 4d] + 2·ext`;
-  para otros polígonos, `Σ lados − Σ deducciones − tangentes del cierre + 2·φ·R + 2·ext`. Se verifica con recorridos paso a paso de la barra.
-* **Aro**: `π·(D − d) + traslape`. **Espiral**: `N·√((π·(D − d))² + p²) + 2·vueltas·π·(D − d)` con `N = (H − d)/p`.
-* **Diámetros de doblez** (ACI 318-19 Tablas 25.3.1/25.3.2): barras principales #3–#8 → 6d, #9–#11 → 8d; estribos #3–#5 → 4d, #6–#8 → 6d.
+* **Estribos cerrados**: los dos ganchos nacen en el vértice de cierre. Rectangular con ambas patas a 135°: `2(a+b) + [(3π − 8)·R − 4d] + ext₁ + ext₂`;
+  en general `Σ lados − Σ deducciones − tangentes del cierre + (φ₁ + φ₂)·R + ext₁ + ext₂`. Se verifica con recorridos paso a paso de la barra.
+* **Aro**: `π·(D − d) + traslape + Σ (φ·R + ext)`. **Espiral**: `N·√((π·(D − d))² + p²) + (vueltas_inicio + vueltas_fin)·π·(D − d) + Σ (φ·R + ext)`
+  con `N = (H − d)/p`.
+* **Diámetros de doblez** (ACI 318-19 Tablas 25.3.1/25.3.2): barras principales #3–#8 → 6d, #9–#11 → 8d, #14 → 10d; estribos #3–#5 → 4d, #6–#8 → 6d
+  (la norma no define estribos de #9 o mayores; un estribo, aro o espiral de esas barras exige indicar la extensión del gancho).
 * **Ganchos estándar**: 90° → 12d (principales); 135° de estribo → mayor de 6d y 75 mm; 180° → mayor de 4d y 65 mm.
 * **Redondeo**: la longitud de corte sube al múltiplo de 5 mm (configurable) y los pesos usan esa longitud.
-* El catálogo ASTM A615 cubre #3 (10M) a #11 (36M): el rango de 10 a 32 mm son #3 a #10. Se amplía con `register_rebar`.
+* El catálogo ASTM A615 cubre #3 (10M) a #11 (36M) y #14 (43M): el rango de 10 a 32 mm son #3 a #10. La #18 u otra serie se agrega con `register_rebar`.
 
 > **Verifique la norma vigente.** Los valores de ganchos y diámetros de doblez están codificados de
 > ACI 318-19 / NSR-10 y no se pudieron contrastar en línea al desarrollar este prototipo. Confírmelos
@@ -249,7 +275,9 @@ Para un estribo poligonal cerrado se hereda de `ClosedPolyShape`; para geometrí
 ## Alcance y limitaciones
 
 * Los estribos se modelan con ambos ganchos en una misma esquina y tangentes a ella; la diferencia con un
-  detalle real (ganchos anidados) es de pocos milímetros.
+  detalle real (ganchos anidados) es de pocos milímetros. En el aro los ganchos nacen del punto de cierre y de la punta del traslape.
+* El dibujo de la espiral es una elevación esquemática: las vueltas adicionales se ven como anillos planos y los ganchos como patas
+  sobre los extremos; el detalle exacto está en la columna *Ganchos* y en el cálculo.
 * Los esquemas son proporcionales a las cotas con un tramo mínimo, para que un gancho corto siga legible.
 * El plan de corte usa barras comerciales de una sola longitud por diámetro; la comparación de 6, 9 y 12 m ayuda a elegirla, pero
   no mezcla longitudes en una misma compra.

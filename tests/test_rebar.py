@@ -15,11 +15,22 @@ from core.rebar import (
 )
 
 
-def test_catalog_covers_3_to_11_with_consistent_masses():
-    assert [r.designation for r in list_rebars()] == [f"#{n}" for n in range(3, 12)]
+def test_catalog_covers_3_to_11_and_14_with_consistent_masses():
+    assert [r.designation for r in list_rebars()] == [f"#{n}" for n in (*range(3, 12), 14)]
     for r in list_rebars():
         theoretical = math.pi / 4 * r.diameter_mm**2 * 7850 / 1e6
         assert r.linear_mass_kg_m == pytest.approx(theoretical, rel=0.01), r.designation
+
+
+def test_bar_14_has_astm_properties_and_aci_bend_rules():
+    n14 = get_rebar("#14")
+    assert n14.diameter_mm == pytest.approx(43.0) and n14.linear_mass_kg_m == pytest.approx(11.38)
+    assert get_rebar("43M") is n14 and n14.metric_designation == "43M"
+    assert n14.bend_diameter_mm() == pytest.approx(430.0)  # ACI 318-19 Tabla 25.3.1: #14 y #18 → 10 d
+    assert n14.standard_hook(HookType.DEG_90).extension_mm == pytest.approx(516.0)  # 12 d
+    assert n14.standard_hook(HookType.DEG_180).extension_mm == pytest.approx(172.0)  # 4 d (> 65 mm)
+    with pytest.raises(GeometryError, match="mayores a #8"):
+        n14.bend_diameter_mm(BendUse.STIRRUP)  # la norma no define estribos de #14
 
 
 def test_metric_range_10_to_32_is_covered():

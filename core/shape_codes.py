@@ -5,8 +5,8 @@ Cada forma es un ``dataclass`` inmutable con sus cotas **exteriores** (de fuera 
 con el desglose del cálculo, de modo que cada planilla sea auditable.
 
 Este módulo define la base, el registro y las formas históricas (``R``, ``L``, ``U``, ``E``); el resto del
-catálogo (ganchos, estribos 90°/135°, Z, quiebres, omegas, polígonos, espirales, aros y la forma
-personalizada) está en :mod:`core.shape_templates`.
+catálogo (ganchos, estribo en U, Z, quiebres, omegas, polígonos, espirales, aros y la forma personalizada)
+está en :mod:`core.shape_templates`.
 
 Cómo agregar una forma nueva (la más simple: una polilínea)::
 
@@ -51,6 +51,33 @@ from core.sketch import DimLabel, Sketch, format_dimension
 
 _EPS = 1e-6
 
+#: Opciones de los formularios: ganchos de barra, de estribo y de aros/espirales, estilo y orientación.
+HOOK_CHOICES = ((0, "Sin gancho"), (90, "90°"), (135, "135°"), (180, "180°"))
+STIRRUP_HOOK_CHOICES = ((90, "90°"), (135, "135°"))
+RING_HOOK_CHOICES = ((0, "Sin gancho"), (90, "90°"), (135, "135°"))
+STYLE_CHOICES = (("main", "Barra"), ("stirrup", "Estribo / ligadura"))
+SIDE_CHOICES = ((0, "Mismo lado"), (1, "Lados opuestos"))
+
+
+def hook_spec(angle: int, extension: float | None) -> HookSpec | None:
+    """Gancho pedido en un extremo: ``angle`` 0 = sin gancho; ``extension`` ``None`` = la estándar de la norma."""
+    return HookSpec(float(angle), extension) if angle else None
+
+
+def migrate_single_hook(parameters: dict[str, object]) -> dict[str, object]:
+    """Pasa los parámetros de los estribos antiguos (un solo ``hook`` y ``hook_extension_mm`` para ambas patas)
+    a los actuales (gancho y extensión del inicio y del final por separado)."""
+    migrated = dict(parameters)
+    if "hook" in migrated:
+        hook = migrated.pop("hook")
+        migrated.setdefault("hook_start", hook)
+        migrated.setdefault("hook_end", hook)
+    if "hook_extension_mm" in migrated:
+        extension = migrated.pop("hook_extension_mm")
+        migrated.setdefault("ext_start", extension)
+        migrated.setdefault("ext_end", extension)
+    return migrated
+
 
 @dataclass(frozen=True)
 class ShapeCode(ABC):
@@ -83,6 +110,11 @@ class ShapeCode(ABC):
     def template(cls) -> ShapeCode:
         """Instancia con los valores por defecto de la plantilla."""
         return cls(**{spec.name: spec.default for spec in cls.parameters()})
+
+    @classmethod
+    def migrate(cls, parameters: dict[str, object]) -> dict[str, object]:
+        """Adapta parámetros de versiones anteriores de la forma (al abrir proyectos guardados); por defecto, no cambia nada."""
+        return parameters
 
     def __post_init__(self) -> None:
         for spec in self.parameters():
@@ -167,13 +199,25 @@ def available_shapes() -> dict[str, type[ShapeCode]]:
     return dict(_SHAPE_REGISTRY)
 
 
+#: Códigos retirados del catálogo y la forma que los reemplaza, con los parámetros que reproducen la anterior.
+_LEGACY_SHAPES: dict[str, tuple[str, dict[str, object]]] = {
+    "E90": ("E", {"hook_start": 90, "hook_end": 90}),  # el estribo de 90° es el estribo único con patas a 90°
+}
+
+
 def create_shape(code: str, **parameters: object) -> ShapeCode:
-    """Crea una forma por código, p. ej. ``create_shape("L", a=1200, b=300)``."""
+    """Crea una forma por código, p. ej. ``create_shape("L", a=1200, b=300)``.
+
+    Acepta los códigos y parámetros de versiones anteriores (``E90``, ``hook``…) y los convierte a los actuales.
+    """
+    if code in _LEGACY_SHAPES:
+        code, defaults = _LEGACY_SHAPES[code]
+        parameters = {**defaults, **parameters}
     try:
         cls = _SHAPE_REGISTRY[code]
     except KeyError:
         raise KeyError(f"Forma {code!r} no registrada (disponibles: {', '.join(_SHAPE_REGISTRY)}).") from None
-    return cls(**parameters)
+    return cls(**cls.migrate(parameters))
 
 
 # ---------------------------------------------------------------------- formas
@@ -252,68 +296,53 @@ class UBar(OpenPolyShape):
         return {"A": self.a, "B": self.b, "C": self.c}
 
     def poly(self) -> OpenPoly:
-        return OpenPoly((self.b, self.a, self.c), (90.0, 90.0), end_hooks=(True, True), start_heading=-90.0)
+        return OpenPoly((self.b, self.a, self.c), (90.0, 90.0), end_hooks=(True, True), start_heading=-90.0,
+                        names=("B", "A", "C"))
 
 
+@register_shape
 @dataclass(frozen=True)
-class _RectStirrup(ClosedPolyShape):
-    """Estribo rectangular cerrado con dos ganchos iguales en una misma esquina.
+class Stirrup(ClosedPolyShape):
+    """Estribo rectangular cerrado con una pata (gancho) en cada extremo, de 90° o 135° a elección.
 
     ``a`` x ``b`` son las cotas exteriores (ancho x alto, de cara exterior a cara exterior de la barra); el
-    recubrimiento ya está descontado. ``hook_extension_mm`` es la extensión recta de cada gancho; si se omite
-    se usa la estándar (mayor de 6d y 75 mm en 135°; igual en 90° para #3–#5 y 12d para #6–#8).
+    recubrimiento ya está descontado. Las dos patas nacen en la misma esquina de cierre: ``hook_start`` es el
+    gancho con que empieza la barra y ``hook_end`` el con que termina (por defecto, ambos de 135°, el gancho
+    sísmico). ``ext_start`` y ``ext_end`` son las extensiones rectas de cada pata; si se omiten se usa la estándar
+    (mayor de 6d y 75 mm en 135°; igual en 90° para #3–#5 y 12d para #6–#8).
 
     Geometría al eje (rectángulo ``W x H``, ``W = a − d``, ``H = b − d``, radio al eje ``R``)::
 
         4 tramos rectos            2W + 2H − 8R
         3 dobleces de 90°          3·(π/2)·R
-        2 ganchos de φ             2·φ·R
-        2 extensiones              2·ext
+        2 ganchos de φ₁ y φ₂       (φ₁ + φ₂)·R
+        2 extensiones              ext₁ + ext₂
 
-    Se supone que cada gancho nace en la tangente de la esquina de cierre. Con φ = 135° el total es
-    ``2(a+b) + [(3π − 8)·R − 4d] + 2·ext``.
+    Se supone que cada gancho nace en la tangente de la esquina de cierre. Con φ₁ = φ₂ = 135° el total es
+    ``2(a+b) + [(3π − 8)·R − 4d] + ext₁ + ext₂``.
     """
 
-    HOOK_ANGLE: ClassVar[float]
+    code: ClassVar[str] = "E"
+    name: ClassVar[str] = "Estribo rectangular"
+    description: ClassVar[str] = "Estribo rectangular cerrado; cada pata (inicio y final) con gancho de 90° o 135°."
 
-    field_labels: ClassVar[dict[str, str]] = {
-        "a": "A · ancho exterior",
-        "b": "B · alto exterior",
-        "hook_extension_mm": "Extensión del gancho",
-    }
+    a: float = param("A · ancho exterior", default=300.0)
+    b: float = param("B · alto exterior", default=400.0)
+    hook_start: int = param("Gancho inicial", "choice", 135, choices=STIRRUP_HOOK_CHOICES)
+    ext_start: float | None = param("Extensión del gancho inicial", "length", None, optional=True)
+    hook_end: int = param("Gancho final", "choice", 135, choices=STIRRUP_HOOK_CHOICES)
+    ext_end: float | None = param("Extensión del gancho final", "length", None, optional=True)
 
-    a: float
-    b: float
-    hook_extension_mm: float | None = None
+    @classmethod
+    def migrate(cls, parameters: dict[str, object]) -> dict[str, object]:
+        return migrate_single_hook(parameters)
 
     def dimensions(self) -> dict[str, float]:
         return {"A": self.a, "B": self.b}
 
     def poly(self) -> ClosedPoly:
-        return ClosedPoly((self.a, self.b, self.a, self.b), (90.0,) * 4,
-                          HookSpec(self.HOOK_ANGLE, self.hook_extension_mm), BendUse.STIRRUP)
-
-
-@register_shape
-@dataclass(frozen=True)
-class Stirrup135(_RectStirrup):
-    """Estribo rectangular cerrado con ganchos sísmicos de 135°."""
-
-    code: ClassVar[str] = "E"
-    name: ClassVar[str] = "Estribo 135°"
-    description: ClassVar[str] = "Estribo rectangular cerrado con dos ganchos a 135° (sísmico)."
-    HOOK_ANGLE: ClassVar[float] = 135.0
-
-
-@register_shape
-@dataclass(frozen=True)
-class Stirrup90(_RectStirrup):
-    """Estribo rectangular cerrado con ganchos a 90°."""
-
-    code: ClassVar[str] = "E90"
-    name: ClassVar[str] = "Estribo 90°"
-    description: ClassVar[str] = "Estribo rectangular cerrado con dos ganchos a 90°."
-    HOOK_ANGLE: ClassVar[float] = 90.0
+        return ClosedPoly((self.a, self.b, self.a, self.b), (90.0,) * 4, HookSpec(float(self.hook_start), self.ext_start),
+                          HookSpec(float(self.hook_end), self.ext_end), BendUse.STIRRUP, names=("A", "B", "A", "B"))
 
 
 # El resto del catálogo se registra al importar este módulo (después de definir la base y el registro).

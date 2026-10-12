@@ -6,7 +6,8 @@ Dos familias cubren casi todo el catálogo:
   un gancho opcional (90°, 135° o 180°) en cada extremo. Sirve para rectas, L, U, Z, quiebres, omegas,
   barras con ganchos, estribos abiertos y formas dibujadas a mano.
 * **Polígono cerrado con ganchos** (:class:`ClosedPoly`): estribos rectangulares, triangulares,
-  trapezoidales… cuyos extremos se cruzan en un vértice de cierre con dos ganchos.
+  trapezoidales… cuyos extremos se cruzan en un vértice de cierre con dos ganchos (cada uno de 90° o 135°,
+  iguales o distintos).
 
 Convención de cotas (la de ACI SP-66 / CRSI / BS 8666): cada tramo se mide **de fuera a fuera** de la
 barra, entre los vértices donde se cortan las caras exteriores de los dobleces, proyectado sobre el eje
@@ -22,12 +23,13 @@ El resultado no depende de hacia qué lado gire cada doblez, solo de las cotas y
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from core.cutlength import CutLength, HookInfo
 from core.geometry import GeometryError
 from core.rebar import BendUse, HookType, Rebar
-from core.sketch import DimLabel, Point, Sketch, format_dimension, proportional
+from core.sketch import DimLabel, Point, Sketch, dimension_text, format_dimension, proportional
 
 _EPS = 1e-6
 LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -48,6 +50,8 @@ class OpenPoly:
     ``legs`` son las cotas exteriores de los tramos y ``angles`` los giros entre tramos consecutivos
     (positivo = a la izquierda). ``end_hooks`` marca los tramos de extremo que deben informarse como
     ganchos (p. ej. la pata de una L o de una U) aunque no sean un gancho normativo explícito.
+    ``names`` es la referencia de planilla de cada tramo (``"A"``, ``"B"``…) tal como se rotula en el
+    esquema; por defecto, las letras en orden. Un nombre repetido, o vacío, no se rotula.
     """
 
     legs: tuple[float, ...]
@@ -59,6 +63,7 @@ class OpenPoly:
     end_hooks: tuple[bool, bool] = (False, False)
     floor: float = 0.3  # tramo mínimo relativo en el esquema, para que un tramo corto siga legible
     start_heading: float = 0.0  # rumbo del primer tramo en el esquema (0° = hacia la derecha)
+    names: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -67,12 +72,17 @@ class ClosedPoly:
 
     ``sides`` son las cotas exteriores de cada lado y ``turns`` el giro en el vértice al final de cada
     lado (todos positivos; el último es el vértice de cierre, entre el último y el primer lado).
+    ``hook_start`` es el gancho con que empieza la barra (antes del primer lado) y ``hook_end`` el
+    gancho con que termina (después del último); pueden ser distintos en ángulo y extensión.
+    ``names`` es la referencia de planilla de cada lado, como en :class:`OpenPoly`.
     """
 
     sides: tuple[float, ...]
     turns: tuple[float, ...]
-    hook: HookSpec
+    hook_start: HookSpec
+    hook_end: HookSpec
     use: BendUse = BendUse.STIRRUP
+    names: tuple[str, ...] | None = None
 
 
 def angles_text(values: list[float]) -> str:
@@ -90,6 +100,15 @@ def use_name(use: BendUse) -> str:
 def hook_extent(angle_deg: float, outer_radius_mm: float) -> float:
     """Distancia, medida sobre el tramo, entre el inicio del arco del gancho y su punto más exterior."""
     return outer_radius_mm * math.sin(math.radians(min(angle_deg, 90.0)))
+
+
+def leg_names(count: int, names: Sequence[str] | None) -> tuple[str, ...]:
+    """Referencia de planilla de cada tramo: la indicada o las letras A, B, C… en orden."""
+    if names is not None:
+        if len(names) != count:
+            raise GeometryError(f"Se indicaron {len(names)} nombres de cota para {count} tramos.")
+        return tuple(names)
+    return tuple(LETTERS[i % 26] for i in range(count))
 
 
 def resolve_hook(rebar: Rebar, use: BendUse, hook: HookSpec) -> tuple[HookInfo, list[str]]:
@@ -154,6 +173,7 @@ def analyse_open(code: str, poly: OpenPoly, rebar: Rebar) -> OpenResult:
         extensions += info.extension_mm
 
     n = len(legs)
+    names = leg_names(n, poly.names)
     straights: list[float] = []
     for i, leg in enumerate(legs):
         before = trims[0] if i == 0 else outer * tans[i - 1]
@@ -161,7 +181,7 @@ def analyse_open(code: str, poly: OpenPoly, rebar: Rebar) -> OpenResult:
         straight = leg - before - after
         if straight < -_EPS:
             raise GeometryError(
-                f"Forma {code} con {rebar.designation}: la cota {LETTERS[i % 26]} = {leg:g} mm es menor que el "
+                f"Forma {code} con {rebar.designation}: la cota {names[i] or f'del tramo {i + 1}'} = {leg:g} mm es menor que el "
                 f"mínimo geométrico de {before + after:.1f} mm (radio de doblez + diámetro de barra)."
             )
         straights.append(max(straight, 0.0))
@@ -196,6 +216,31 @@ def analyse_open(code: str, poly: OpenPoly, rebar: Rebar) -> OpenResult:
     return OpenResult(cut, tuple(straights), resolved[0], resolved[1], first_tail, last_tail)
 
 
+@dataclass(frozen=True)
+class HookAllowance:
+    """Material que consumen los ganchos de un extremo cualquiera: arcos al eje y extensiones rectas."""
+
+    infos: tuple[HookInfo, ...]
+    arc_mm: float
+    extension_mm: float
+    warnings: tuple[str, ...]
+
+
+def hook_allowance(rebar: Rebar, use: BendUse, specs: Sequence[HookSpec | None]) -> HookAllowance:
+    """Largo de barra de los ganchos pedidos (``None`` = sin gancho en ese extremo)."""
+    radius = rebar.centerline_radius_mm(use)
+    infos: list[HookInfo] = []
+    warnings: list[str] = []
+    for spec in specs:
+        if spec is None:
+            continue
+        info, extra = resolve_hook(rebar, use, spec)
+        infos.append(info)
+        warnings += [w for w in extra if w not in warnings]  # dos ganchos iguales avisan una sola vez
+    return HookAllowance(tuple(infos), sum(math.radians(h.angle_deg) * radius for h in infos),
+                         sum(h.extension_mm for h in infos), tuple(warnings))
+
+
 def analyse_closed(code: str, poly: ClosedPoly, rebar: Rebar) -> CutLength:
     sides, turns = poly.sides, poly.turns
     n = len(sides)
@@ -206,32 +251,32 @@ def analyse_closed(code: str, poly: ClosedPoly, rebar: Rebar) -> CutLength:
     radius = rebar.centerline_radius_mm(poly.use)
     outer = r + d
     tans = [math.tan(math.radians(t) / 2.0) for t in turns]
-    info, warnings = resolve_hook(rebar, poly.use, poly.hook)
+    names = leg_names(n, poly.names)
+    hooks = hook_allowance(rebar, poly.use, (poly.hook_start, poly.hook_end))
 
     straights = []
     for i, side in enumerate(sides):
         straight = side - outer * (tans[i - 1] + tans[i])  # vértice anterior (i − 1, cíclico) y siguiente (i)
         if straight < -_EPS:
+            label = names[i] or f"del lado {i + 1}"
             raise GeometryError(
-                f"Forma {code} con {rebar.designation}: la cota {LETTERS[i % 26]} = {side:g} mm es menor que el "
+                f"Forma {code} con {rebar.designation}: la cota {label} = {side:g} mm es menor que el "
                 f"mínimo geométrico de {outer * (tans[i - 1] + tans[i]):.1f} mm (radio de doblez + diámetro de barra)."
             )
         straights.append(max(straight, 0.0))
 
     closing = n - 1  # en el vértice de cierre los dos ganchos reemplazan al doblez
-    arcs = sum(math.radians(t) * radius for j, t in enumerate(turns) if j != closing)
-    arcs += 2.0 * math.radians(info.angle_deg) * radius
-    extensions = 2.0 * info.extension_mm
-    total = sum(straights) + arcs + extensions
+    arcs = sum(math.radians(t) * radius for j, t in enumerate(turns) if j != closing) + hooks.arc_mm
+    total = sum(straights) + arcs + hooks.extension_mm
     interior = angles_text([180 - t for t in turns])
     angle_note = f"Ángulos internos {interior} · " if any(abs(180 - t - 90.0) >= 0.5 for t in turns) else ""
     return CutLength(
         dimension_sum_mm=sum(sides),
-        bend_adjustment_mm=total - sum(sides) - extensions,
-        extension_mm=extensions,
+        bend_adjustment_mm=total - sum(sides) - hooks.extension_mm,
+        extension_mm=hooks.extension_mm,
         notes=(f"{angle_note}Ø interior {2 * r:.0f} mm",),
-        warnings=tuple(warnings),
-        hooks=(info, info),
+        warnings=hooks.warnings,
+        hooks=hooks.infos,
     )
 
 
@@ -307,13 +352,16 @@ def open_polyline_sketch(code: str, poly: OpenPoly, rebar: Rebar | None) -> Sket
 
     centroid = (sum(p[0] for p in points) / len(points), sum(p[1] for p in points) / len(points))
     labels: list[DimLabel] = []
+    names = leg_names(len(poly.legs), poly.names)
     for i, length in enumerate(poly.legs):
+        if not names[i] or names[i] in names[:i]:
+            continue  # una cota repetida (p. ej. las dos patas iguales de una U) se rotula una sola vez
         a, b = points[i], points[i + 1]
         mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
         normal = (-math.sin(math.radians(headings[i])), math.cos(math.radians(headings[i])))
         if (mid[0] - centroid[0]) * normal[0] + (mid[1] - centroid[1]) * normal[1] < -1e-9:
             normal = (-normal[0], -normal[1])  # el rótulo va hacia afuera de la figura
-        labels.append(DimLabel(format_dimension(length), mid, normal))
+        labels.append(DimLabel(dimension_text(names[i], length), mid, normal))
     shown: set[int] = set()
     for i, turn in enumerate(poly.angles):
         if abs(abs(turn) - 90.0) >= 0.5 and round(abs(turn)) not in shown:  # un rótulo por ángulo distinto
@@ -347,28 +395,27 @@ def closed_polygon_sketch(code: str, poly: ClosedPoly, rebar: Rebar | None) -> S
     extent = max(max(p[0] for p in raw) - min(p[0] for p in raw), max(p[1] for p in raw) - min(p[1] for p in raw), 1e-9)
     pts = [(p[0] / extent, p[1] / extent) for p in raw[:n]]  # el último punto repite al primero
 
-    phi = poly.hook.angle_deg
+    phi1, phi2 = poly.hook_start.angle_deg, poly.hook_end.angle_deg
     smallest = min(poly.sides) / extent
     tail = max(0.07, 0.22 * smallest)
     gap = 0.12 * smallest
     first_dir, last_dir = headings[0], headings[n - 1]
     vertex = pts[0]
     # Primer gancho (antes de salir por el primer lado) y segundo (al llegar por el último lado).
-    tail1_dir = first_dir + 180.0 - phi
-    tail2_dir = last_dir + phi
-    if abs(phi - 90.0) < 1e-9:  # a 90° las patas quedarían sobre los lados: se inclinan un poco hacia adentro
-        tail1_dir -= 12.0
-        tail2_dir += 12.0
-    start = _step(vertex, _dir(tail1_dir), tail)
+    start = hook_tail(vertex, first_dir, phi1, True, tail)
     back = _step(vertex, _dir(last_dir), -gap)
-    end = _step(back, _dir(tail2_dir), tail)
+    end = hook_tail(back, last_dir, phi2, False, tail)
     path = (start, *pts, back, end)
 
     labels: list[DimLabel] = []
+    names = leg_names(n, poly.names)
     for i, side in enumerate(poly.sides):
+        if not names[i] or names[i] in names[:i]:
+            continue
         a, b = pts[i], pts[(i + 1) % n]
         mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
-        labels.append(DimLabel(format_dimension(side), mid, (math.sin(math.radians(headings[i])), -math.cos(math.radians(headings[i])))))
+        labels.append(DimLabel(dimension_text(names[i], side), mid,
+                               (math.sin(math.radians(headings[i])), -math.cos(math.radians(headings[i])))))
     shown: set[int] = set()
     for j, turn in enumerate(poly.turns):
         interior = 180.0 - turn
@@ -382,16 +429,32 @@ def closed_polygon_sketch(code: str, poly: ClosedPoly, rebar: Rebar | None) -> S
         labels.append(DimLabel(f"{interior:.0f}°", v, _unit((u1[0] + u2[0], u1[1] + u2[1])), kind="angle"))
     if rebar is not None:
         try:
-            info = analyse_closed_hook(code, poly, rebar)
+            first, _ = resolve_hook(rebar, poly.use, poly.hook_start)
+            last, _ = resolve_hook(rebar, poly.use, poly.hook_end)
         except GeometryError:
-            info = None
-        if info is not None:  # el rótulo va fuera de la esquina de cierre, donde nacen los dos ganchos
+            first = last = None
+        if first is not None and last is not None:
+            # El rótulo va fuera de la esquina de cierre, donde nacen los dos ganchos.
             centroid = (sum(p[0] for p in pts) / n, sum(p[1] for p in pts) / n)
             side = -1.0 if vertex[0] <= centroid[0] else 1.0
-            labels += _hook_label(info.extension_mm, vertex, (side, 0.0))
+            if abs(first.extension_mm - last.extension_mm) < 0.5:
+                labels += _hook_label(first.extension_mm, vertex, (side, 0.0))
+            else:  # extensiones distintas: un solo rótulo con el largo del gancho inicial y el del final, en ese orden
+                text = f"G {format_dimension(first.extension_mm)} / {format_dimension(last.extension_mm)}"
+                labels.append(DimLabel(text, vertex, (side, 0.0), kind="hook"))
     return Sketch(paths=(path,), labels=tuple(labels))
 
 
-def analyse_closed_hook(code: str, poly: ClosedPoly, rebar: Rebar) -> HookInfo:
-    """Gancho resuelto de un polígono cerrado (el pedido o el estándar)."""
-    return resolve_hook(rebar, poly.use, poly.hook)[0]
+def hook_tail(point: Point, heading_deg: float, angle_deg: float, at_start: bool, length: float) -> Point:
+    """Extremo libre de un gancho dibujado como pata recta (para esquemas de formas con geometría propia).
+
+    ``point`` es el extremo de la barra y ``heading_deg`` su rumbo de recorrido ahí. El gancho gira ``angle_deg``
+    hacia la izquierda del sentido de recorrido (el interior de una figura recorrida en sentido antihorario); a 90° la
+    pata se inclina 12° hacia el interior para que no quede encima de la barra.
+    """
+    tilt = 12.0 if abs(angle_deg - 90.0) < 1e-9 else 0.0
+    if at_start:  # el gancho precede al punto: la pata sale hacia atrás y gira en sentido contrario
+        direction = heading_deg + 180.0 - angle_deg - tilt
+    else:
+        direction = heading_deg + angle_deg + tilt
+    return _step(point, _dir(direction), length)

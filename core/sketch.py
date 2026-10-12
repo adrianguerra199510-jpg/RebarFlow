@@ -32,10 +32,11 @@ class DimLabel:
 
 @dataclass(frozen=True)
 class Sketch:
-    """Polilíneas de la barra y rótulos de cotas."""
+    """Polilíneas de la barra, líneas de cota auxiliares (``guides``, punteadas) y rótulos."""
 
     paths: tuple[tuple[Point, ...], ...]
     labels: tuple[DimLabel, ...] = ()
+    guides: tuple[tuple[Point, ...], ...] = ()
 
 
 def proportional(values: Sequence[float], minimum: float = 0.3) -> list[float]:
@@ -47,3 +48,8 @@ def proportional(values: Sequence[float], minimum: float = 0.3) -> list[float]:
 def format_dimension(value: float) -> str:
     """Texto de una cota en mm, redondeada al milímetro como en las tablas de la planilla."""
     return f"{value:.0f}"
+
+
+def dimension_text(name: str, value: float) -> str:
+    """Rótulo de una cota con su referencia de planilla: ``"A=400"`` (la letra es la columna de la tabla)."""
+    return f"{name}={format_dimension(value)}"

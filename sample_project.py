@@ -5,7 +5,7 @@ from __future__ import annotations
 from core.element import ElementType, StructuralElement
 from core.project import Project
 from core.rebar import get_rebar
-from core.shape_codes import LBar, Stirrup90, Stirrup135, StraightBar, UBar
+from core.shape_codes import LBar, Stirrup, StraightBar, UBar
 from core.shape_templates import (
     CrankBar, CustomBar, HookedBar, OmegaBar, RingTie, Spiral, TrapStirrup, TriStirrup, UStirrup, ZBar,
 )
@@ -25,7 +25,7 @@ def build_beam(name: str, level: str, quantity: int) -> StructuralElement:
     # Bastones en los apoyos: L con tramo vertical de 350 mm.
     beam.add_group("A3", n5, LBar(a=1500, b=350), 4, "Bastón en apoyo")
     # Estribos cerrados: cotas exteriores = sección − 2 x recubrimiento.
-    beam.add_group("E1", n3, Stirrup135(300 - 2 * COVER_MM, 500 - 2 * COVER_MM), 38, "Estribos @100/@200")
+    beam.add_group("E1", n3, Stirrup(300 - 2 * COVER_MM, 500 - 2 * COVER_MM), 38, "Estribos @100/@200")
     return beam
 
 
@@ -34,7 +34,7 @@ def build_column(name: str, level: str, quantity: int, section_mm: float, height
     column = StructuralElement(name, ElementType.COLUMN, level, quantity)
     column.add_group("C1", get_rebar("#7"), StraightBar(height_mm + 900), 8, "Barras longitudinales")
     side = section_mm - 2 * COVER_MM
-    column.add_group("E1", get_rebar("#3"), Stirrup135(side, side), 26, "Estribos @100/@150")
+    column.add_group("E1", get_rebar("#3"), Stirrup(side, side), 26, "Estribos @100/@150")
     return column
 
 
@@ -64,24 +64,31 @@ def build_project() -> Project:
 
 def build_catalog_project() -> Project:
     """Una barra de cada plantilla del catálogo de formas (en un elemento de tipo «Otros»), para ver y probar todas."""
-    n3, n4, n5 = get_rebar("#3"), get_rebar("#4"), get_rebar("#5")
+    n3, n4, n5, n14 = get_rebar("#3"), get_rebar("#4"), get_rebar("#5"), get_rebar("#14")
     element = StructuralElement("Catálogo", ElementType.OTHER, "Ejemplos", 1)
     rows = [
         ("R1", n5, StraightBar(3000), 4, "Recta"),
+        ("R2", n14, StraightBar(3000), 4, "Recta #14"),
         ("L1", n5, LBar.with_standard_hook(n5, a=1200), 4, "Bastón L con gancho estándar de 90°"),
+        ("L2", n14, LBar.with_standard_hook(n14, a=1500), 2, "Bastón L #14 con gancho estándar de 90°"),
         ("U1", n5, UBar.with_standard_hooks(n5, a=1650), 4, "Gancho U con patas de 90°"),
         ("G1", n4, HookedBar(a=1800, hook_start=90, hook_end=180), 6, "Ganchos de 90° y 180°"),
         ("G2", n3, HookedBar(a=320, hook_start=135, hook_end=90, style="stirrup"), 20, "Traba: gancho de 135° y de 90°"),
-        ("E1", n3, Stirrup135(320, 320), 24, "Estribo rectangular, ganchos a 135°"),
-        ("E2", n3, Stirrup90(220, 420), 24, "Estribo rectangular, ganchos a 90°"),
-        ("EU1", n3, UStirrup(a=300, b=400, hook=135), 12, "Estribo abierto en U, ganchos a 135°"),
+        ("E1", n3, Stirrup(320, 320), 24, "Estribo rectangular, patas a 135°"),
+        ("E2", n3, Stirrup(220, 420, hook_start=90, hook_end=90), 24, "Estribo rectangular, patas a 90°"),
+        ("E3", n3, Stirrup(220, 420, hook_start=135, hook_end=90, ext_end=120), 24,
+         "Estribo rectangular, pata inicial a 135° y final a 90° con extensión de 120 mm"),
+        ("EU1", n3, UStirrup(a=300, b=400), 12, "Estribo abierto en U, patas a 135°"),
         ("Z1", n5, ZBar(a=250, b=200, c=250), 8, "Barra en Z"),
         ("Q1", n4, CrankBar(a=900, b=350, c=900, angle=45), 10, "Quiebre a 45°"),
         ("O1", n3, OmegaBar(a=200, b=300, c=400, d=300, e=200), 10, "Omega"),
-        ("ET1", n3, TriStirrup(a=300, b=300, c=300, hook=135), 10, "Estribo triangular"),
-        ("ETR1", n3, TrapStirrup(bottom=400, top=250, height=300, hook=135), 10, "Estribo trapezoidal"),
+        ("ET1", n3, TriStirrup(a=300, b=300, c=300), 10, "Estribo triangular"),
+        ("ETR1", n3, TrapStirrup(bottom=400, top=250, height=300), 10, "Estribo trapezoidal"),
         ("AR1", n3, RingTie(diameter=400, lap=250), 20, "Aro circular con traslape"),
-        ("ES1", n3, Spiral(diameter=400, pitch=75, height=2400), 2, "Espiral (se suministra en rollo)"),
+        ("AR2", n3, RingTie(diameter=400, lap=0, hook_start=135, hook_end=135), 20, "Aro circular con ganchos a 135°"),
+        ("ES1", n3, Spiral(diameter=400, pitch=75, height=2400), 2, "Espiral con 1.5 vueltas adicionales en cada extremo (rollo)"),
+        ("ES2", n3, Spiral(diameter=400, pitch=75, height=2400, turns_start=2.0, turns_end=1.0, hook_start=135, hook_end=90),
+         2, "Espiral con 2 vueltas al inicio, 1 al final y ganchos de 135° y 90°"),
         ("X1", n4, CustomBar(legs=(300.0, 200.0, 300.0, 250.0), angles=(90.0, -90.0, 60.0), hook_end=90), 6,
          "Forma dibujada a mano: 4 tramos, giros de 90°, −90° y 60° y gancho final de 90°"),
     ]

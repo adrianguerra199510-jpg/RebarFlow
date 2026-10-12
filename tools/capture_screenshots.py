@@ -85,6 +85,36 @@ def capture_interface(out: Path) -> None:
     app.processEvents()
     custom.grab().save(str(out / "ui_dialogo_personalizada.png"))
 
+    stirrup = BarDialog(window, suggested_mark="E3")
+    stirrup.bar.setCurrentIndex(stirrup.bar.findData("#3"))
+    stirrup.shape.setCurrentIndex(stirrup.shape.findText("E · Estribo rectangular"))
+    stirrup._widgets["hook_end"].setCurrentIndex(stirrup._widgets["hook_end"].findData(90))
+    stirrup._widgets["ext_end"].setValue(120)
+    stirrup.show()
+    app.processEvents()
+    stirrup.grab().save(str(out / "ui_dialogo_estribo.png"))
+
+    ring = BarDialog(window, suggested_mark="AR2")
+    ring.bar.setCurrentIndex(ring.bar.findData("#3"))
+    ring.shape.setCurrentIndex(ring.shape.findText("AR · Aro circular"))
+    ring._widgets["lap"].setValue(0)
+    for name in ("hook_start", "hook_end"):
+        ring._widgets[name].setCurrentIndex(ring._widgets[name].findData(135))
+    ring.show()
+    app.processEvents()
+    ring.grab().save(str(out / "ui_dialogo_aro.png"))
+
+    spiral = BarDialog(window, suggested_mark="ES2")
+    spiral.bar.setCurrentIndex(spiral.bar.findData("#3"))
+    spiral.shape.setCurrentIndex(spiral.shape.findText("ES · Espiral"))
+    spiral._widgets["turns_start"].setValue(2.0)
+    spiral._widgets["turns_end"].setValue(1.0)
+    for name, angle in (("hook_start", 135), ("hook_end", 90)):
+        spiral._widgets[name].setCurrentIndex(spiral._widgets[name].findData(angle))
+    spiral.show()
+    app.processEvents()
+    spiral.grab().save(str(out / "ui_dialogo_espiral.png"))
+
     templates = BarDialog(window, suggested_mark="G1")
     templates.show()
     templates.shape.showPopup()

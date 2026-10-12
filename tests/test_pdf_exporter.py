@@ -4,7 +4,7 @@ import pytest
 
 from core.element import ElementType, StructuralElement
 from core.rebar import get_rebar
-from core.shape_codes import LBar, Stirrup135, StraightBar, UBar
+from core.shape_codes import LBar, Stirrup, StraightBar, UBar
 from engine.bbs_calculator import BBSCalculator
 from exporters.pdf_exporter import PdfExporter
 
@@ -20,8 +20,8 @@ def result():
     beam.add_group("A1", n5, StraightBar(5600), 3)
     beam.add_group("A2", n5, UBar.with_standard_hooks(n5, 5500), 2)
     beam.add_group("A3", n5, LBar(1500, 350), 4)
-    beam.add_group("E1", n3, Stirrup135(220, 420), 38)
-    beam.add_group("E2", n3, Stirrup135(220, 420, hook_extension_mm=50), 2)  # aviso de gancho corto
+    beam.add_group("E1", n3, Stirrup(220, 420), 38)
+    beam.add_group("E2", n3, Stirrup(220, 420, ext_start=50, ext_end=50), 2)  # aviso de gancho corto
     return BBSCalculator().calculate([beam])
 
 
@@ -49,7 +49,7 @@ def test_many_elements_paginate_and_empty_result_exports(tmp_path):
     elements = []
     for i in range(40):
         el = StructuralElement(f"C-{i}", ElementType.COLUMN, "Nivel 1", 2)
-        el.add_group("E1", n3, Stirrup135(320, 320), 20)
+        el.add_group("E1", n3, Stirrup(320, 320), 20)
         elements.append(el)
     big = PdfExporter().export(BBSCalculator().calculate(elements), tmp_path / "big.pdf")
     assert pages(big) > 3

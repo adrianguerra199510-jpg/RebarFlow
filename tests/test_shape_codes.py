@@ -10,7 +10,7 @@ from core.shape_codes import (
     CutLength,
     LBar,
     ShapeCode,
-    Stirrup135,
+    Stirrup,
     StraightBar,
     UBar,
     available_shapes,
@@ -83,7 +83,7 @@ def _turtle_stirrup(a: float, b: float, rebar, ext: float):
 @pytest.mark.parametrize(("bar", "a", "b"), [("#3", 220, 420), ("#3", 320, 320), ("#4", 300, 600), ("#5", 250, 350)])
 def test_stirrup_length_matches_independent_path_walk(bar, a, b):
     rebar = get_rebar(bar)
-    cut = Stirrup135(a, b).cut_length(rebar)
+    cut = Stirrup(a, b).cut_length(rebar)
     ext = rebar.standard_hook(HookType.DEG_135, BendUse.STIRRUP).extension_mm
     length, width, height = _turtle_stirrup(a, b, rebar, ext)
     assert cut.total_mm == pytest.approx(length, abs=1e-6)
@@ -94,9 +94,9 @@ def test_stirrup_length_matches_independent_path_walk(bar, a, b):
 
 def test_stirrup_default_extension_and_warning_for_short_hook():
     rebar = get_rebar("#3")
-    ok = Stirrup135(220, 420).cut_length(rebar)
+    ok = Stirrup(220, 420).cut_length(rebar)
     assert ok.extension_mm == 150.0 and not ok.warnings
-    short = Stirrup135(220, 420, hook_extension_mm=50).cut_length(rebar)
+    short = Stirrup(220, 420, ext_start=50, ext_end=50).cut_length(rebar)
     assert short.extension_mm == 100.0
     assert short.warnings and "75" in short.warnings[0]
 
@@ -104,7 +104,7 @@ def test_stirrup_default_extension_and_warning_for_short_hook():
 @pytest.mark.parametrize(
     ("shape", "bar"),
     [(LBar(30, 300), "#4"), (LBar(1000, 40), "#4"), (UBar(100, 300, 300), "#5"),
-     (Stirrup135(50, 400), "#3"), (Stirrup135(400, 50), "#3")],
+     (Stirrup(50, 400), "#3"), (Stirrup(400, 50), "#3")],
 )
 def test_impossible_geometry_is_rejected(shape, bar):
     with pytest.raises(GeometryError, match="mínimo geométrico"):
@@ -113,14 +113,14 @@ def test_impossible_geometry_is_rejected(shape, bar):
 
 def test_stirrup_minimum_side_is_bend_diameter_plus_two_bars():
     # #3: D = 4d = 38.1 mm → lado mínimo exterior D + 2d = 57.15 mm
-    Stirrup135(57.2, 57.2).cut_length(get_rebar("#3"))
+    Stirrup(57.2, 57.2).cut_length(get_rebar("#3"))
     with pytest.raises(GeometryError):
-        Stirrup135(57.0, 57.2).cut_length(get_rebar("#3"))
+        Stirrup(57.0, 57.2).cut_length(get_rebar("#3"))
 
 
 def test_stirrup_with_large_bar_is_rejected():
     with pytest.raises(GeometryError):
-        Stirrup135(400, 400).cut_length(get_rebar("#9"))
+        Stirrup(400, 400).cut_length(get_rebar("#9"))
 
 
 @pytest.mark.parametrize("bad", [0, -5, float("nan"), float("inf"), "300", True])

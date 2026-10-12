@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication, QDialogButtonBox  # noqa: E402
 
 from core.element import ElementType  # noqa: E402
 from core.rebar import get_rebar  # noqa: E402
-from core.shape_codes import Stirrup135  # noqa: E402
+from core.shape_codes import Stirrup  # noqa: E402
 from gui.app import create_application  # noqa: E402
 from engine.cutting_report import plan_rows  # noqa: E402
 from gui.dialogs import BarDialog, ElementDialog, LegsEditor, ProjectDialog  # noqa: E402
@@ -86,7 +86,7 @@ def test_add_element_and_bars_updates_totals_and_marks_modified(window):
     assert window.bars_table.rowCount() == 1  # solo el subtotal
 
     dialog = BarDialog(window, suggested_mark="E1", used_marks=[])
-    dialog.shape.setCurrentIndex(dialog.shape.findText("E · Estribo 135°"))
+    dialog.shape.setCurrentIndex(dialog.shape.findText("E · Estribo rectangular"))
     dialog._widgets["a"].setValue(320)
     dialog._widgets["b"].setValue(320)
     dialog.quantity.setValue(10)
@@ -208,21 +208,72 @@ def test_bar_dialog_builds_fields_from_shape_and_keeps_values(qapp):
     dialog.shape.setCurrentIndex(dialog.shape.findText("U · Gancho U"))
     assert list(dialog._widgets) == ["a", "b", "c"]
     dialog._widgets["a"].setValue(1234)
-    dialog.shape.setCurrentIndex(dialog.shape.findText("E · Estribo 135°"))
-    assert list(dialog._widgets) == ["a", "b", "hook_extension_mm"]
+    dialog.shape.setCurrentIndex(dialog.shape.findText("E · Estribo rectangular"))
+    assert list(dialog._widgets) == ["a", "b", "hook_start", "ext_start", "hook_end", "ext_end"]
     assert dialog._widgets["a"].value() == 1234  # se conserva el valor del campo de igual nombre
-    assert dialog._widgets["hook_extension_mm"].value() == 0  # "estándar"
-    assert dialog.result_group().shape.hook_extension_mm is None
-    dialog._widgets["hook_extension_mm"].setValue(50)
+    assert dialog._widgets["ext_start"].value() == 0 and dialog._widgets["ext_end"].value() == 0  # "estándar"
+    assert dialog.result_group().shape.ext_start is None
+    dialog._widgets["ext_start"].setValue(50)
     assert "75" in dialog.info.text() and "Aviso" in dialog.info.text()  # gancho por debajo del mínimo
-    assert dialog.result_group().shape == Stirrup135(1234, 500, 50)
+    assert dialog.result_group().shape == Stirrup(1234, 400, ext_start=50)
+
+
+def _choose(dialog, name, value):
+    combo = dialog._widgets[name]
+    combo.setCurrentIndex(combo.findData(value))
+
+
+def test_bar_dialog_offers_bar_14(qapp):
+    dialog = BarDialog(None)
+    designations = [dialog.bar.itemData(i) for i in range(dialog.bar.count())]
+    assert designations[-1] == "#14" and designations[:-1] == [f"#{n}" for n in range(3, 12)]
+    dialog.bar.setCurrentIndex(dialog.bar.findData("#14"))
+    dialog.shape.setCurrentIndex(dialog.shape.findText("L · Bastón L"))
+    assert ok_enabled(dialog) and "Longitud de corte" in dialog.info.text()
+    dialog.shape.setCurrentIndex(dialog.shape.findText("E · Estribo rectangular"))
+    assert not ok_enabled(dialog) and "mayores a #8" in dialog.info.text()  # la norma no define estribos de #14
+
+
+def test_bar_dialog_stirrup_has_a_hook_per_leg(qapp):
+    dialog = BarDialog(None)
+    dialog.shape.setCurrentIndex(dialog.shape.findText("E · Estribo rectangular"))
+    assert not any(dialog.shape.itemText(i).startswith("E90") for i in range(dialog.shape.count()))
+    _choose(dialog, "hook_end", 90)
+    shape = dialog.result_group().shape
+    assert (shape.hook_start, shape.hook_end) == (135, 90)
+    assert "135° · 75  /  90° · 75" in dialog.info.text()
+
+
+def test_bar_dialog_ring_with_hooks_and_no_lap(qapp):
+    dialog = BarDialog(None)
+    dialog.shape.setCurrentIndex(dialog.shape.findText("AR · Aro circular"))
+    assert list(dialog._widgets) == ["diameter", "lap", "hook_start", "ext_start", "hook_end", "ext_end"]
+    dialog._widgets["lap"].setValue(0)  # los ganchos cierran el aro: sin traslape
+    _choose(dialog, "hook_start", 135)
+    _choose(dialog, "hook_end", 135)
+    shape = dialog.result_group().shape
+    assert shape.lap == 0 and shape.hook_start == shape.hook_end == 135
+    assert "2 × 135° · 75" in dialog.info.text()
+
+
+def test_bar_dialog_spiral_extra_turns_and_hooks(qapp):
+    dialog = BarDialog(None)
+    dialog.shape.setCurrentIndex(dialog.shape.findText("ES · Espiral"))
+    assert list(dialog._widgets) == ["diameter", "pitch", "height", "turns_start", "turns_end", "hook_start", "ext_start",
+                                     "hook_end", "ext_end"]
+    dialog._widgets["turns_start"].setValue(2.0)
+    dialog._widgets["turns_end"].setValue(0.5)
+    _choose(dialog, "hook_end", 90)
+    shape = dialog.result_group().shape
+    assert (shape.turns_start, shape.turns_end, shape.hook_start, shape.hook_end) == (2.0, 0.5, 0, 90)
+    assert "2 al inicio y 0.5 al final" in dialog.info.text() and "90° · 75" in dialog.info.text()
 
 
 def test_bar_dialog_prefills_existing_group(qapp):
     group = build_project().elements[2].groups[3]  # estribo E1 de V-101
     dialog = BarDialog(None, group=group, used_marks=["A1", "A2", "A3"])
     assert dialog.mark.text() == "E1" and dialog.bar.currentData() == "#3"
-    assert dialog.shape.currentData() is Stirrup135
+    assert dialog.shape.currentData() is Stirrup
     assert dialog._widgets["a"].value() == 220 and dialog._widgets["b"].value() == 420
     assert dialog.quantity.value() == 38 and ok_enabled(dialog)
     assert dialog.result_group().shape == group.shape
@@ -320,7 +371,7 @@ def test_hook_column_is_in_the_tables(window):
 def test_bar_dialog_offers_every_template_with_a_thumbnail(qapp):
     dialog = BarDialog(None, suggested_mark="T")
     classes = [dialog.shape.itemData(i) for i in range(dialog.shape.count())]
-    assert {"R", "L", "U", "E", "E90", "G", "EU", "Z", "Q", "O", "ET", "ETR", "AR", "ES", "X"} <= {c.code for c in classes}
+    assert {"R", "L", "U", "E", "G", "EU", "Z", "Q", "O", "ET", "ETR", "AR", "ES", "X"} <= {c.code for c in classes}
     for index, cls in enumerate(classes):
         assert not dialog.shape.itemIcon(index).isNull(), cls.code
         dialog.shape.setCurrentIndex(index)
@@ -407,7 +458,7 @@ def test_other_element_type_and_project_remnant_setting(qapp, window):
 def test_open_catalog_example_from_the_menu(window):
     window.open_catalog()
     assert window.project.name == "Catálogo de formas" and not window.modified
-    assert window.bars_table.rowCount() == 17  # 16 marcas + subtotal
+    assert window.bars_table.rowCount() == 22  # 21 marcas + subtotal
     pictures = [r for r in range(window.bars_table.rowCount()) if window.bars_table.line_for_row(r)]
     assert all(not window.bars_table.item(r, 3).icon().isNull() for r in pictures)
     assert window.plan_table.rowCount() > 1 and window.act_catalog.text().startswith("Abrir ejemplo")

@@ -9,8 +9,7 @@ from core.project import Project
 from core.element import ElementType, StructuralElement
 from core.shape_codes import (
     LBar,
-    Stirrup90,
-    Stirrup135,
+    Stirrup,
     UBar,
     available_shapes,
     create_shape,
@@ -29,7 +28,7 @@ from core.shape_templates import (
 )
 from engine.bbs_calculator import BBSCalculator
 
-N3, N4, N5, N6 = (get_rebar(n) for n in ("#3", "#4", "#5", "#6"))
+N3, N4, N5, N6, N9, N14 = (get_rebar(n) for n in ("#3", "#4", "#5", "#6", "#9", "#14"))
 
 
 def delta90(rebar, use=BendUse.MAIN):
@@ -65,10 +64,10 @@ def walk(items, heading=0.0):
 # ------------------------------------------------------------------ catálogo
 def test_catalog_contains_every_requested_typology():
     codes = set(available_shapes())
-    assert {"R", "L", "U", "E", "E90", "G", "EU", "Z", "Q", "O", "ET", "ETR", "AR", "ES", "X"} <= codes
+    assert {"R", "L", "U", "E", "G", "EU", "Z", "Q", "O", "ET", "ETR", "AR", "ES", "X"} <= codes
 
 
-@pytest.mark.parametrize("code", ["R", "L", "U", "E", "E90", "G", "EU", "Z", "Q", "O", "ET", "ETR", "AR", "ES", "X"])
+@pytest.mark.parametrize("code", ["R", "L", "U", "E", "G", "EU", "Z", "Q", "O", "ET", "ETR", "AR", "ES", "X"])
 def test_every_template_computes_draws_and_describes_itself(code):
     cls = available_shapes()[code]
     assert cls.name and cls.description and cls.parameters()
@@ -125,7 +124,7 @@ def test_hooked_bar_length_matches_independent_walk(start, end):
 def test_u_stirrup_geometry_closes_on_its_outer_dimensions():
     """Con ganchos de 135° el eje encierra exactamente a − d de ancho y b − d de alto (+ d/2 de arco)."""
     rebar = N3
-    shape = UStirrup(a=300, b=400, hook=135)
+    shape = UStirrup(a=300, b=400, hook_start=135, hook_end=135)
     d, r, R = rebar.diameter_mm, rebar.bend_radius_mm(BendUse.STIRRUP), rebar.centerline_radius_mm(BendUse.STIRRUP)
     cut = shape.cut_length(rebar)
     ext = cut.hooks[0].extension_mm
@@ -148,9 +147,9 @@ def test_standard_hook_lengths_are_reported():
     assert cut.hooks[0].extension_mm == pytest.approx(152.4)  # 12 d
     assert cut.hooks[0].standard_mm == pytest.approx(152.4)
     assert cut.hook_text == "90° · 152"
-    stirrup = Stirrup135(220, 420).cut_length(N4)
+    stirrup = Stirrup(220, 420).cut_length(N4)
     assert stirrup.hook_text == "2 × 135° · 76"
-    assert Stirrup90(220, 420).cut_length(N4).hook_text == "2 × 90° · 76"
+    assert Stirrup(220, 420, hook_start=90, hook_end=90).cut_length(N4).hook_text == "2 × 90° · 76"
 
 
 def test_hook_extension_validation():
@@ -166,7 +165,7 @@ def test_hook_extension_validation():
 def test_rectangular_stirrup_90_formula():
     d, R = N3.diameter_mm, N3.centerline_radius_mm(BendUse.STIRRUP)
     ext = max(6 * d, 75)
-    cut = Stirrup90(220, 420).cut_length(N3)
+    cut = Stirrup(220, 420, hook_start=90, hook_end=90).cut_length(N3)
     expected = 2 * (220 - d) + 2 * (420 - d) - 8 * R + (3 * math.pi / 2 + math.pi) * R + 2 * ext
     assert cut.total_mm == pytest.approx(expected)
 
@@ -197,8 +196,8 @@ def test_geometry_errors_name_the_leg():
 
 # ------------------------------------------------------------------ polígonos
 def test_trapezoid_with_equal_bases_is_the_rectangular_stirrup():
-    trap = TrapStirrup(bottom=220, top=220, height=420, hook=135).cut_length(N3)
-    rect = Stirrup135(220, 420).cut_length(N3)
+    trap = TrapStirrup(bottom=220, top=220, height=420, hook_start=135, hook_end=135).cut_length(N3)
+    rect = Stirrup(220, 420).cut_length(N3)
     assert trap.total_mm == pytest.approx(rect.total_mm)
 
 
@@ -220,7 +219,7 @@ def test_equilateral_triangle_stirrup_length():
     turn = math.radians(120)
     straight = s - (r + d) * 2 * math.tan(turn / 2)
     expected = 3 * straight + 2 * turn * R + 2 * math.radians(135) * R + 2 * ext
-    assert TriStirrup(s, s, s, hook=135).cut_length(rebar).total_mm == pytest.approx(expected)
+    assert TriStirrup(s, s, s, hook_start=135, hook_end=135).cut_length(rebar).total_mm == pytest.approx(expected)
     notes = TriStirrup(s, s, s).cut_length(rebar).notes[0]
     assert "60°" in notes
 
@@ -236,7 +235,7 @@ def test_ring_matches_bs8666_code_75():
 
 def test_spiral_length_and_spacing_warning():
     d = N4.diameter_mm
-    shape = Spiral(diameter=400, pitch=75, height=2000, extra_turns=1.5)
+    shape = Spiral(diameter=400, pitch=75, height=2000, turns_start=1.5, turns_end=1.5)
     n = (2000 - d) / 75
     centre = math.pi * (400 - d)
     assert shape.cut_length(N4).total_mm == pytest.approx(n * math.hypot(centre, 75) + 2 * 1.5 * centre)
@@ -283,7 +282,7 @@ def test_create_shape_and_json_round_trip_of_new_shapes():
     project = Project(elements=[StructuralElement("X-1", ElementType.OTHER, "Nivel 1", 2)])
     element = project.elements[0]
     element.add_group("1", N4, CustomBar(legs=(400, 300, 200), angles=(90, -45), hook_end=90), 3)
-    element.add_group("2", N3, TriStirrup(300, 280, 260, hook=90), 10)
+    element.add_group("2", N3, TriStirrup(300, 280, 260, hook_start=90, hook_end=90), 10)
     element.add_group("3", N4, Spiral(350, 70, 1800), 2)
     element.add_group("4", N4, HookedBar(1000, 135, 100, 90, None, 1, "stirrup"), 4)
     loaded = project_from_dict(project_to_dict(project))
@@ -305,3 +304,149 @@ def test_parameters_are_described_for_forms():
                 assert spec.choices
     custom = {spec.name: spec for spec in CustomBar.parameters()}
     assert custom["legs"].kind == "lengths" and custom["angles"].hidden
+
+
+# ------------------------------------------------------------------ barra #14
+def test_bar_14_cut_length_with_standard_hook():
+    leg = N14.standard_hook(HookType.DEG_90).outside_leg_mm  # 516 + 215 + 43
+    assert leg == pytest.approx(774.0)
+    cut = LBar.with_standard_hook(N14, a=1500).cut_length(N14)
+    assert cut.total_mm == pytest.approx(1500 + 774 - delta90(N14))
+    assert cut.hook_text == "90° · 516"
+    with pytest.raises(GeometryError, match="mayores a #8"):
+        Stirrup(600, 600).cut_length(N14)
+
+
+# ------------------------------------------------------------------ estribo único con patas independientes
+@pytest.mark.parametrize("start,end", [(135, 135), (90, 90), (135, 90), (90, 135)])
+def test_stirrup_legs_formula_for_every_hook_combination(start, end):
+    d, R = N3.diameter_mm, N3.centerline_radius_mm(BendUse.STIRRUP)
+    ext = max(6 * d, 75)
+    cut = Stirrup(220, 420, hook_start=start, hook_end=end).cut_length(N3)
+    expected = 2 * (220 - d) + 2 * (420 - d) - 8 * R + (3 * math.pi / 2 + math.radians(start + end)) * R + 2 * ext
+    assert cut.total_mm == pytest.approx(expected)
+    assert [h.angle_deg for h in cut.hooks] == [start, end]
+
+
+def test_stirrup_legs_have_independent_extensions():
+    cut = Stirrup(220, 420, hook_start=135, hook_end=90, ext_start=80, ext_end=130).cut_length(N3)
+    assert [h.extension_mm for h in cut.hooks] == [80, 130]
+    assert cut.hook_text == "135° · 80  /  90° · 130"
+    swapped = Stirrup(220, 420, hook_start=90, hook_end=135, ext_start=130, ext_end=80).cut_length(N3)
+    assert swapped.total_mm == pytest.approx(cut.total_mm)  # el largo no depende de cuál pata es la inicial
+    assert len(Stirrup(220, 420, ext_start=50, ext_end=50).cut_length(N3).warnings) == 1  # un solo aviso, no dos
+
+
+@pytest.mark.parametrize("shape", [Stirrup(), UStirrup(), TriStirrup(), TrapStirrup()])
+def test_every_stirrup_family_takes_a_hook_on_each_leg(shape):
+    assert [p.name for p in type(shape).parameters()][-4:] == ["hook_start", "ext_start", "hook_end", "ext_end"]
+    mixed = type(shape)(**{**{p.name: getattr(shape, p.name) for p in type(shape).parameters()},
+                           "hook_start": 135, "hook_end": 90})
+    assert [h.angle_deg for h in mixed.cut_length(N3).hooks] == [135, 90]
+
+
+def test_there_is_a_single_stirrup_template():
+    assert "E90" not in available_shapes() and available_shapes()["E"] is Stirrup
+
+
+def test_legacy_stirrup_and_spiral_parameters_still_load():
+    assert create_shape("E90", a=220, b=420, hook_extension_mm=None) == Stirrup(220, 420, hook_start=90, hook_end=90)
+    assert create_shape("E", a=220, b=420, hook_extension_mm=90) == Stirrup(220, 420, ext_start=90, ext_end=90)
+    assert create_shape("EU", a=300, b=400, hook=90, hook_extension_mm=None) == UStirrup(300, 400, hook_start=90, hook_end=90)
+    assert create_shape("ET", a=300, b=300, c=300, hook=135, hook_extension_mm=None) == TriStirrup(300, 300, 300)
+    assert create_shape("ES", diameter=400, pitch=75, height=2000, extra_turns=2.0) == Spiral(
+        400, 75, 2000, turns_start=2.0, turns_end=2.0)
+
+
+# ------------------------------------------------------------------ aro y espiral con ganchos
+def test_ring_hooks_add_their_arc_and_extension():
+    d, R = N3.diameter_mm, N3.centerline_radius_mm(BendUse.STIRRUP)
+    base = math.pi * (400 - d)
+    assert RingTie(400, lap=0).cut_length(N3).total_mm == pytest.approx(base)
+    both = RingTie(400, lap=0, hook_start=135, hook_end=135).cut_length(N3)
+    assert both.total_mm == pytest.approx(base + 2 * (math.radians(135) * R + 75))
+    assert both.hook_text == "2 × 135° · 75"
+    mixed = RingTie(400, lap=100, hook_start=135, hook_end=90, ext_end=120).cut_length(N3)
+    assert mixed.total_mm == pytest.approx(base + 100 + (math.radians(135) + math.radians(90)) * R + 75 + 120)
+    assert RingTie(400, lap=250, hook_end=90).cut_length(N3).hook_text == "90° · 75"
+    assert RingTie(400, lap=250).cut_length(N3).hooks == ()  # sin ganchos sigue siendo el código 75 de BS 8666
+
+
+def test_ring_hook_of_big_bars_needs_an_explicit_extension():
+    with pytest.raises(GeometryError, match="no hay gancho estándar de 135°"):
+        RingTie(900, lap=0, hook_start=135).cut_length(N9)
+    forced = RingTie(900, lap=0, hook_start=135, ext_start=200).cut_length(N9)
+    assert forced.hooks[0].extension_mm == 200 and "sin extensión estándar" in forced.warnings[0]
+
+
+def test_spiral_has_independent_extra_turns_and_hooks_at_each_end():
+    d, R = N4.diameter_mm, N4.centerline_radius_mm(BendUse.STIRRUP)
+    n, centre = (2000 - d) / 75, math.pi * (400 - d)
+    working = n * math.hypot(centre, 75)
+    uneven = Spiral(400, 75, 2000, turns_start=2.0, turns_end=0.5).cut_length(N4)
+    assert uneven.total_mm == pytest.approx(working + 2.5 * centre)
+    assert Spiral(400, 75, 2000, turns_start=0.5, turns_end=2.0).cut_length(N4).total_mm == pytest.approx(uneven.total_mm)
+    assert Spiral(400, 75, 2000, turns_start=0, turns_end=0).cut_length(N4).total_mm == pytest.approx(working)
+    hooked = Spiral(400, 75, 2000, turns_start=0, turns_end=0, hook_start=135, hook_end=90, ext_end=150).cut_length(N4)
+    assert hooked.total_mm == pytest.approx(working + (math.radians(135) + math.radians(90)) * R + max(6 * d, 75) + 150)
+    assert hooked.hook_text == "135° · 76  /  90° · 150"
+    with pytest.raises(GeometryError):
+        Spiral(400, 75, 2000, turns_start=-1)
+
+
+# ------------------------------------------------------------------ referencias de cota en el dibujo
+def dim_texts(shape, rebar=None):
+    return {label.text for label in shape.sketch(rebar).labels if label.kind == "dim"}
+
+
+def hook_texts(shape, rebar):
+    return [label.text for label in shape.sketch(rebar).labels if label.kind == "hook"]
+
+
+@pytest.mark.parametrize("code", sorted(available_shapes()))
+def test_every_dimension_label_carries_the_table_reference(code):
+    shape = available_shapes()[code].template()
+    dims = shape.dimensions()
+    texts = dim_texts(shape, N3)
+    assert texts
+    for text in texts:
+        name, value = text.split("=")
+        assert name in dims and value == f"{dims[name]:.0f}", text
+    assert {text.split("=")[0] for text in texts} == set(dims)  # todas las columnas de la planilla están en el dibujo
+
+
+def test_labels_follow_the_dimension_letters_not_the_drawing_order():
+    assert dim_texts(UBar(600, 300, 350)) == {"A=600", "B=300", "C=350"}  # la base es A aunque se dibuje en medio
+    assert dim_texts(Stirrup(220, 420)) == {"A=220", "B=420"}  # los lados iguales se rotulan una vez
+    assert dim_texts(UStirrup(300, 400)) == {"A=300", "B=400"}
+    trap = TrapStirrup(400, 250, 300)
+    assert dim_texts(trap) == {"A=400", "B=250", "C=300", "D=309"}
+    assert len(trap.sketch().guides) == 3  # la altura se acota con una línea de cota punteada
+    assert dim_texts(CustomBar(legs=(1, 2, 3, 4), angles=(90, 90, 90))) == {"A=1", "B=2", "C=3", "D=4"}
+
+
+def test_hook_labels_for_both_legs():
+    assert hook_texts(Stirrup(220, 420), N3) == ["G 75"]  # extensiones iguales: un solo rótulo
+    assert hook_texts(Stirrup(220, 420, hook_start=135, hook_end=90), N3) == ["G 75"]
+    assert hook_texts(Stirrup(220, 420, ext_end=120), N3) == ["G 75 / 120"]
+    assert hook_texts(RingTie(400, lap=0, hook_start=135, hook_end=135), N3) == ["G 75"]
+    assert hook_texts(RingTie(400, lap=250, hook_end=90), N3) == ["G 75"]
+    assert hook_texts(RingTie(400, lap=250), N3) == []
+    assert hook_texts(Spiral(400, 75, 2000, hook_start=135, hook_end=90, ext_end=150), N4) == ["G 76", "G 150"]
+    assert hook_texts(Spiral(400, 75, 2000), N4) == []
+    assert hook_texts(Stirrup(220, 420), None) == []  # sin barra no se conoce el largo del gancho
+
+
+@pytest.mark.parametrize("code", sorted(available_shapes()))
+@pytest.mark.parametrize("size", [(320, 120), (640, 240)])
+def test_sketch_image_keeps_every_label_inside_the_picture(code, size):
+    """Ningún texto, cota punteada ni rótulo toca el borde de la imagen (solo la barra puede llegar hasta él)."""
+    from exporters.shape_images import BAR_COLOR, render_sketch
+
+    shape = available_shapes()[code].template()
+    image = render_sketch(shape.sketch(N3), *size)
+    width, height = image.size
+    border = [image.getpixel((x, y)) for x in range(width) for y in (0, height - 1)]
+    border += [image.getpixel((x, y)) for y in range(height) for x in (0, width - 1)]
+    not_bar = [p for p in border if p[3] > 60 and sum((a - b) ** 2 for a, b in zip(p[:3], BAR_COLOR[:3])) > 25**2]
+    assert not not_bar

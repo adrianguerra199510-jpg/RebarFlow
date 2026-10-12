@@ -3,7 +3,7 @@ from openpyxl import load_workbook
 
 from core.element import ElementType, StructuralElement
 from core.rebar import get_rebar
-from core.shape_codes import LBar, Stirrup135, StraightBar, UBar
+from core.shape_codes import LBar, Stirrup, StraightBar, UBar
 from engine.bbs_calculator import BBSCalculator
 from exporters.excel_exporter import ExcelExporter
 
@@ -14,8 +14,8 @@ def result():
     beam = StructuralElement("V-101", ElementType.BEAM, "Nivel 1", 4)
     beam.add_group("A1", n5, StraightBar(5600), 3)
     beam.add_group("A2", n5, UBar.with_standard_hooks(n5, 5500), 2)
-    beam.add_group("E1", n3, Stirrup135(220, 420), 38)
-    beam.add_group("E2", n3, Stirrup135(220, 420, hook_extension_mm=50), 2)  # gancho corto → aviso
+    beam.add_group("E1", n3, Stirrup(220, 420), 38)
+    beam.add_group("E2", n3, Stirrup(220, 420, ext_start=50, ext_end=50), 2)  # gancho corto → aviso
     column = StructuralElement("C-1", ElementType.COLUMN, "Nivel 2", 6)
     column.add_group("C1", n5, LBar(1200, 300), 8)
     return BBSCalculator().calculate([beam, column])

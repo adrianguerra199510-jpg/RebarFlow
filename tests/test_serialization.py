@@ -5,7 +5,7 @@ import pytest
 from core.project import Project
 from core.rebar import GRADE_40, get_rebar
 from core.serialization import load_project, project_from_dict, project_to_dict, save_project
-from core.shape_codes import Stirrup135
+from core.shape_codes import Stirrup
 from engine.bbs_calculator import BBSCalculator
 from sample_project import build_project
 
@@ -29,11 +29,11 @@ def test_round_trip_preserves_everything(tmp_path):
 def test_optional_dimension_and_grade_survive(tmp_path):
     project = build_project()
     project.elements[2].groups.append(
-        type(project.elements[2].groups[0])("E9", get_rebar("#3", GRADE_40), Stirrup135(220, 420, 90), 3)
+        type(project.elements[2].groups[0])("E9", get_rebar("#3", GRADE_40), Stirrup(220, 420, ext_start=90, ext_end=90), 3)
     )
     loaded = load_project(save_project(project, tmp_path / "p.rebarflow"))
     group = loaded.elements[2].groups[-1]
-    assert group.shape.hook_extension_mm == 90 and group.rebar.grade == GRADE_40
+    assert group.shape.ext_start == 90 and group.shape.ext_end == 90 and group.rebar.grade == GRADE_40
 
 
 def test_file_is_plain_json_with_inputs_only(tmp_path):
@@ -72,3 +72,31 @@ def test_project_validation_and_levels():
     with pytest.raises(ValueError):
         Project(paper="legal")
     assert build_project().levels == ["Cimentación", "Nivel 1", "Nivel 2"]
+
+
+def test_project_saved_with_the_old_stirrup_codes_still_opens():
+    """Archivos de versiones anteriores: el estribo E90 y los parámetros de un solo gancho."""
+    data = project_to_dict(build_project())
+    groups = data["elements"][2]["groups"]
+    stirrup = next(g for g in groups if g["shape"]["code"] == "E")
+    stirrup["shape"] = {"code": "E90", "dimensions": {"a": 220.0, "b": 420.0, "hook_extension_mm": 90.0}}
+    loaded = project_from_dict(data)
+    shape = next(g for g in loaded.elements[2].groups if g.mark == stirrup["mark"]).shape
+    assert (shape.code, shape.hook_start, shape.hook_end, shape.ext_start, shape.ext_end) == ("E", 90, 90, 90, 90)
+
+
+def test_stirrup_with_different_legs_and_ring_and_spiral_hooks_round_trip(tmp_path):
+    from core.element import ElementType, StructuralElement
+    from core.project import Project
+    from core.shape_codes import Stirrup
+    from core.shape_templates import RingTie, Spiral
+
+    element = StructuralElement("X-1", ElementType.OTHER, "Nivel 1", 1)
+    n3 = get_rebar("#3")
+    element.add_group("E1", n3, Stirrup(220, 420, hook_start=135, hook_end=90, ext_end=120), 5)
+    element.add_group("AR", n3, RingTie(400, lap=0, hook_start=135, hook_end=135), 5)
+    element.add_group("ES", n3, Spiral(400, 75, 2000, turns_start=2.0, turns_end=1.0, hook_start=90, ext_start=100), 1)
+    loaded = load_project(save_project(Project(elements=[element]), tmp_path / "p.rebarflow"))
+    for original, copy in zip(element.groups, loaded.elements[0].groups):
+        assert copy.shape == original.shape
+        assert copy.cut_length_mm == original.cut_length_mm

@@ -7,7 +7,7 @@ from io import BytesIO
 from PIL import Image, ImageDraw
 from PySide6.QtGui import QIcon, QPixmap
 
-from core.shape_codes import Stirrup135
+from core.shape_codes import Stirrup
 from core.sketch import Sketch
 from exporters.shape_images import render_sketch
 
@@ -20,7 +20,7 @@ def app_icon_image(size: int = 256) -> Image.Image:
     master = 512
     icon = Image.new("RGBA", (master, master), (0, 0, 0, 0))
     ImageDraw.Draw(icon).rounded_rectangle((0, 0, master - 1, master - 1), radius=master // 5, fill=_NAVY)
-    stirrup = Sketch(Stirrup135(300, 300).sketch().paths)  # sin cotas
+    stirrup = Sketch(Stirrup(300, 300).sketch().paths)  # sin cotas
     inner = round(master * 0.62)
     drawing = render_sketch(stirrup, inner, inner, bar_color=_WHITE, ref_height=round(inner * 1.6))
     offset = (master - inner) // 2
