@@ -9,14 +9,15 @@ from PySide6.QtWidgets import QApplication
 
 from gui.icon import app_icon
 from gui.main_window import MainWindow
-from gui.style import STYLE
+from gui import style
 
 
-def create_application(argv: list[str] | None = None) -> QApplication:
+def create_application(argv: list[str] | None = None, dark: bool | None = None) -> QApplication:
+    """Crea la aplicación con el tema ``dark`` (claro o nocturno); por omisión, el que se dejó la última vez."""
     app = QApplication.instance() or QApplication(argv if argv is not None else sys.argv)
-    app.setStyle("Fusion")
-    app.setStyleSheet(STYLE)
+    app.setOrganizationName("RebarFlow")
     app.setApplicationName("RebarFlow")
+    style.apply_theme(app, style.preferred_dark() if dark is None else dark)
     app.setWindowIcon(app_icon())
     return app
 

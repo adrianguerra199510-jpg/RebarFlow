@@ -17,6 +17,7 @@ _PIECE_COLORS = ((31, 56, 100), (46, 117, 182), (68, 114, 196), (91, 155, 213), 
 _REUSABLE = (198, 224, 180)
 _SCRAP = (217, 217, 217)
 _OUTLINE = (89, 89, 89)
+_OUTLINE_DARK = (170, 178, 192)
 _SUPERSAMPLE = 3
 
 
@@ -25,7 +26,8 @@ def _text_color(fill: tuple[int, int, int]) -> tuple[int, int, int]:
     return (255, 255, 255) if luminance < 150 else (40, 40, 40)
 
 
-def render_pattern_image(pattern: CutPattern, width: int, height: int, min_reusable_mm: float = 0.0) -> Image.Image:
+def render_pattern_image(pattern: CutPattern, width: int, height: int, min_reusable_mm: float = 0.0,
+                         dark: bool = False) -> Image.Image:
     ss = _SUPERSAMPLE
     w, h = width * ss, height * ss
     image = Image.new("RGBA", (w, h), (0, 0, 0, 0))
@@ -56,13 +58,14 @@ def render_pattern_image(pattern: CutPattern, width: int, height: int, min_reusa
         text = f"{remnant / 1000:.2f}"
         if right - left > draw.textlength(text, font=font) + 4 * ss:
             draw.text(((left + right) / 2, h / 2), text, fill=(40, 40, 40), font=font, anchor="mm")
-    draw.rectangle((margin, margin, w - margin, h - margin), outline=_OUTLINE, width=ss)
+    draw.rectangle((margin, margin, w - margin, h - margin), outline=_OUTLINE_DARK if dark else _OUTLINE, width=ss)
     return image.resize((width, height), Image.LANCZOS)
 
 
 @lru_cache(maxsize=1024)
-def render_pattern_png(pattern: CutPattern, width: int = 420, height: int = 34, min_reusable_mm: float = 0.0) -> bytes:
+def render_pattern_png(pattern: CutPattern, width: int = 420, height: int = 34, min_reusable_mm: float = 0.0,
+                       dark: bool = False) -> bytes:
     """PNG (bytes) de la barra comercial cortada según ``pattern``; se guarda en caché."""
     buffer = BytesIO()
-    render_pattern_image(pattern, width, height, min_reusable_mm).save(buffer, format="PNG", optimize=True)
+    render_pattern_image(pattern, width, height, min_reusable_mm, dark).save(buffer, format="PNG", optimize=True)
     return buffer.getvalue()

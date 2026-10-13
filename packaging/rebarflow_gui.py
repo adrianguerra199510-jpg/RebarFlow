@@ -21,7 +21,7 @@ def self_test(folder: Path) -> int:
         from gui.main_window import MainWindow
         from sample_project import build_project
 
-        app = create_application([])
+        app = create_application([], dark=False)
         window = MainWindow(build_project())
         window.show()
         app.processEvents()
@@ -38,8 +38,18 @@ def self_test(folder: Path) -> int:
         window.write_excel(folder / "catalogo.xlsx")
         window.write_pdf(folder / "catalogo.pdf")
         report.append(f"catálogo: {len(window.result.lines)} marcas, {window.result.total_weight_kg:.2f} kg")
+        # Modo nocturno (sin guardar la preferencia): el botón de la esquina superior derecha cambia toda la interfaz.
+        window.theme_button.click()
+        app.processEvents()
+        window.grab().save(str(folder / "nocturno.png"))
+        from gui import style
+
+        if not style.current().dark:
+            raise RuntimeError("el botón de tema no activó el modo nocturno")
+        report.append(f"modo nocturno: {window.act_theme.text()!r}")
+        window.set_dark_mode(False, remember=False)
         for name in ("ventana.png", "planilla.xlsx", "planilla.pdf", "proyecto.rebarflow",
-                     "catalogo.png", "catalogo.xlsx", "catalogo.pdf"):
+                     "catalogo.png", "catalogo.xlsx", "catalogo.pdf", "nocturno.png"):
             size = (folder / name).stat().st_size
             report.append(f"{name}: {size} bytes")
             if size == 0:

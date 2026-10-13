@@ -21,6 +21,7 @@ from core.project import Project
 from core.rebar import GRADE_40, GRADE_60, GRADE_75, get_rebar, list_rebars
 from core.shape_codes import ShapeCode, available_shapes
 from engine.bbs_calculator import round_up_to_step
+from gui import style
 from gui.widgets import ShapePreview, shape_pixmap
 
 _GRADES = (GRADE_40, GRADE_60, GRADE_75)
@@ -478,23 +479,24 @@ class BarDialog(QDialog):
                     "divídala en barras traslapadas."
                 )
             weight = rebar.mass_for_length(rounded / 1000)
+            theme = style.current()
             html = (
                 f"<b>Longitud de corte: {cut.total_mm:,.1f} mm → {rounded:,.0f} mm</b>"
                 f" &nbsp;·&nbsp; peso unitario <b>{weight:,.2f} kg</b><br>"
-                f"<span style='color:#595959'>Σ cotas {cut.dimension_sum_mm:,.1f} mm &nbsp;·&nbsp; dobleces "
+                f"<span style='color:{theme.muted}'>Σ cotas {cut.dimension_sum_mm:,.1f} mm &nbsp;·&nbsp; dobleces "
                 f"{cut.bend_adjustment_mm:+,.1f} mm &nbsp;·&nbsp; extensiones {cut.extension_mm:+,.1f} mm</span>"
             )
             if cut.hooks:
-                html += f"<br><span style='color:#B05504'>Ganchos (° · mm): {escape(cut.hook_text)}</span>"
+                html += f"<br><span style='color:{theme.hook}'>Ganchos (° · mm): {escape(cut.hook_text)}</span>"
             if cut.couplers:
-                html += f"<br><span style='color:#00695C'>Couplers: {escape(cut.coupler_text)}</span>"
-            html += "".join(f"<br><span style='color:#595959'>{escape(n)}</span>" for n in cut.notes)
-            html += "".join(f"<br><span style='color:#C00000'><b>Aviso:</b> {escape(w)}</span>" for w in cut.warnings)
+                html += f"<br><span style='color:{theme.coupler}'>Couplers: {escape(cut.coupler_text)}</span>"
+            html += "".join(f"<br><span style='color:{theme.muted}'>{escape(n)}</span>" for n in cut.notes)
+            html += "".join(f"<br><span style='color:{theme.red}'><b>Aviso:</b> {escape(w)}</span>" for w in cut.warnings)
             self._group = group
         except (GeometryError, ValueError, TypeError) as exc:
             error = str(exc)
         if error:
-            html = f"<span style='color:#C00000'><b>{escape(error)}</b></span>"
+            html = f"<span style='color:{style.current().red}'><b>{escape(error)}</b></span>"
         self.info.setText(html)
         self.preview.set_shape(shape if error is None else None, "Corrija los datos\npara ver el esquema", rebar)
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(self._group is not None)

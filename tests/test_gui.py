@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QTimer  # noqa: E402
+from PySide6.QtCore import QSettings, Qt, QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication, QDialogButtonBox  # noqa: E402
 
 from core.element import ElementType  # noqa: E402
@@ -14,13 +14,29 @@ from gui.app import create_application  # noqa: E402
 from engine.cutting_report import plan_rows  # noqa: E402
 from gui.dialogs import BarDialog, ElementDialog, LegsEditor, ProjectDialog  # noqa: E402
 from core.shape_templates import CustomBar, HookedBar  # noqa: E402
+from gui import style  # noqa: E402
 from gui.main_window import MainWindow  # noqa: E402
 from sample_project import build_project  # noqa: E402
+
+_REAL_PREFERENCE = (style.preferred_dark, style.remember_dark)  # las funciones reales, antes de aislarlas en cada prueba
 
 
 @pytest.fixture(scope="session")
 def qapp():
     return create_application([])
+
+
+@pytest.fixture(autouse=True)
+def _isolate_theme(monkeypatch, qapp):
+    """Cada prueba empieza en el tema claro y no lee ni escribe la preferencia real del usuario."""
+    stored: dict[str, bool] = {}
+    monkeypatch.setattr(style, "remember_dark", lambda dark: stored.update(dark=dark))
+    monkeypatch.setattr(style, "preferred_dark", lambda: stored.get("dark", False))
+    if style.current().dark:  # cambiar el tema repinta todas las ventanas abiertas: solo si hace falta
+        style.apply_theme(qapp, False)
+    yield stored
+    if style.current().dark:
+        style.apply_theme(qapp, False)
 
 
 @pytest.fixture
@@ -509,3 +525,95 @@ def test_closed_detail_panel_can_be_reopened(window):
     menus = {action.text().replace("&", ""): action.menu() for action in window.menuBar().actions()}
     assert window.act_detail in menus["Ver"].actions()
     assert window.act_detail.shortcut().toString() == "F4"
+
+
+# ------------------------------------------------------------------ modo nocturno
+def test_theme_button_sits_in_the_top_right_corner_and_switches_the_whole_interface(window, qapp, _isolate_theme):
+    button = window.theme_button
+    assert window.menuBar().cornerWidget(Qt.Corner.TopRightCorner) is button
+    assert button.defaultAction() is window.act_theme and window.act_theme.text() == "Modo nocturno"
+    assert not style.current().dark and "#F4F6FA" in qapp.styleSheet()
+    menus = {action.text().replace("&", ""): action.menu() for action in window.menuBar().actions()}
+    assert window.act_theme in menus["Ver"].actions()
+
+    button.click()  # claro → nocturno
+    assert style.current() is style.DARK and window.act_theme.text() == "Modo diurno"
+    assert style.DARK.window in qapp.styleSheet() and qapp.palette().window().color().name().lower() == style.DARK.window.lower()
+    assert _isolate_theme == {"dark": True}  # se recuerda para la próxima vez
+    # tablas, panel de detalle y esquemas se redibujan con los colores del tema
+    assert window.project_table.item(0, 0).background().color().name().lower() == style.DARK.band.lower()
+    window.bars_table.selectRow(1)
+    assert style.DARK.muted in window.detail.details.text()
+    dark_icon = window.bars_table.item(1, 2).icon().pixmap(176, 66).toImage()
+
+    button.click()  # nocturno → claro
+    assert style.current() is style.LIGHT and window.act_theme.text() == "Modo nocturno"
+    assert _isolate_theme == {"dark": False}
+    assert window.project_table.item(0, 0).background().color().name().lower() == style.LIGHT.band.lower()
+    window.bars_table.selectRow(1)
+    light_icon = window.bars_table.item(1, 2).icon().pixmap(176, 66).toImage()
+    assert dark_icon != light_icon
+
+
+def test_theme_keeps_the_selected_bar_and_can_skip_remembering(window, _isolate_theme):
+    select_element(window, "V-101", "Nivel 1")
+    window.bars_table.selectRow(2)
+    mark = window.current_line().mark
+    window.set_dark_mode(True, remember=False)
+    assert window.current_line().mark == mark and _isolate_theme == {}
+    window.toggle_theme()
+    assert not style.current().dark and window.current_line().mark == mark
+
+
+def test_dialogs_use_the_theme_colors(window):
+    window.set_dark_mode(True, remember=False)
+    dialog = BarDialog(None, suggested_mark="E7")
+    dialog.shape.setCurrentIndex(dialog.shape.findText("E · Estribo rectangular"))
+    dialog._widgets["ext_start"].setValue(50)  # aviso de norma
+    assert style.DARK.muted in dialog.info.text() and style.DARK.hook in dialog.info.text() and style.DARK.red in dialog.info.text()
+    assert "#595959" not in dialog.info.text()
+    assert not dialog.preview.pixmap().isNull()
+
+
+def test_theme_preference_is_stored_with_qsettings(tmp_path, monkeypatch):
+    preferred, remember = _REAL_PREFERENCE
+    monkeypatch.setattr(style, "_settings", lambda: QSettings(str(tmp_path / "rebarflow.ini"), QSettings.Format.IniFormat))
+    assert preferred() is False  # claro por omisión
+    remember(True)
+    assert preferred() is True and "nocturno" in (tmp_path / "rebarflow.ini").read_text(encoding="utf-8")
+    remember(False)
+    assert preferred() is False
+
+
+def test_application_starts_in_the_remembered_theme(qapp, _isolate_theme):
+    _isolate_theme["dark"] = True
+    create_application([])
+    assert style.current().dark
+    create_application([], dark=False)  # un tema explícito manda sobre la preferencia
+    assert not style.current().dark
+
+
+def test_theme_icons_are_drawn_for_both_directions(qapp):
+    from gui.icon import theme_icon
+
+    moon, sun = theme_icon(to_dark=True), theme_icon(to_dark=False)
+    assert not moon.isNull() and not sun.isNull()
+    assert moon.pixmap(32, 32).toImage() != sun.pixmap(32, 32).toImage()
+
+
+def test_light_is_the_default_even_if_windows_uses_its_dark_theme(qapp, tmp_path, monkeypatch, _isolate_theme):
+    preferred, _ = _REAL_PREFERENCE
+    monkeypatch.setattr(style, "_settings", lambda: QSettings(str(tmp_path / "vacio.ini"), QSettings.Format.IniFormat))
+    assert preferred() is False  # sin preferencia guardada: claro
+    qapp.styleHints().setColorScheme(Qt.ColorScheme.Dark)  # un equipo con el tema oscuro de Windows
+    create_application([])  # arranque normal: lee la preferencia (ninguna → claro)
+    palette = qapp.palette()
+    assert not style.current().dark
+    assert palette.window().color().name().lower() == style.LIGHT.window.lower()
+    assert palette.base().color().name().lower() == "#ffffff" and palette.text().color().name().lower() == style.LIGHT.text.lower()
+    scheme = qapp.styleHints().colorScheme()
+    assert scheme in (Qt.ColorScheme.Light, Qt.ColorScheme.Unknown)  # «Unknown» solo en la plataforma de pruebas sin pantalla
+    win = MainWindow(build_project())
+    assert win.act_theme.text() == "Modo nocturno"  # el botón ofrece pasar a nocturno, no al revés
+    win.modified = False
+    win.close()

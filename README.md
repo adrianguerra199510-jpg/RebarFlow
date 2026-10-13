@@ -170,6 +170,10 @@ comercial (6, 9 y 12 m) y se recomienda la que menos acero compra.
   la barra comercial.
 * **Planilla del proyecto**, **Resumen** (peso por diámetro, sobrante, retales reutilizables, consolidado por nivel y longitud
   comercial recomendada) y **Plan de corte**.
+* **Modo nocturno**: el botón de la esquina superior derecha (luna / sol; también *Ver → Modo nocturno* o Ctrl+Shift+D) cambia toda
+  la interfaz entre el tema claro y uno oscuro: ventana, tablas, diálogos y los esquemas de las barras (trazos claros sobre
+  fondo oscuro). Se recuerda para la próxima vez; **por defecto abre en modo diurno, aunque Windows tenga el tema oscuro** (el
+  tema claro fija su propia paleta en vez de heredar la del sistema). Las planillas exportadas (Excel y PDF) siempre salen en claro.
 * **Panel de detalle**: dibujo grande y desglose del cálculo de la barra seleccionada. Si se cierra con su X, se vuelve a abrir
   con *Ver → Detalle de barra*, el botón «Detalle de barra» de la barra de herramientas o F4.
 * Guardar/abrir proyectos (`.rebarflow`, JSON legible), propiedades del proyecto (barra comercial, redondeo, retal reutilizable,
@@ -181,6 +185,10 @@ comercial (6, 9 y 12 m) y se recomienda la que menos acero compra.
 | Planilla del proyecto | Resumen |
 |---|---|
 | ![Planilla](docs/ui_planilla.png) | ![Resumen](docs/ui_resumen.png) |
+
+| Modo nocturno | Resumen y diálogo en modo nocturno |
+|---|---|
+| ![Modo nocturno](docs/ui_nocturno.png) | ![Resumen nocturno](docs/ui_nocturno_resumen.png) |
 
 | Diálogo de barra | Validación geométrica |
 |---|---|
@@ -231,7 +239,7 @@ exporters/
   cutting_images.py PNG de cada barra comercial con sus piezas y su retal
   excel_exporter.py libro Excel con esquemas (openpyxl)
   pdf_exporter.py   planilla en PDF con esquemas (reportlab)
-gui/                interfaz PySide6: ventana principal, diálogos, tablas, estilo
+gui/                interfaz PySide6: ventana principal, diálogos, tablas, temas claro y nocturno (style.py)
 sample_project.py   proyectos de ejemplo (edificio y catálogo de formas)
 main.py             ejemplo por consola
 packaging/          lanzador, .spec de PyInstaller, icono, build_windows.bat y LEEME del .exe

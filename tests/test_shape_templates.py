@@ -570,3 +570,27 @@ def test_mixed_hook_labels_also_fit_inside_the_picture(shape):
     border = [image.getpixel((x, y)) for x in range(width) for y in (0, height - 1)]
     border += [image.getpixel((x, y)) for y in range(height) for x in (0, width - 1)]
     assert not [p for p in border if p[3] > 60 and sum((a - b) ** 2 for a, b in zip(p[:3], BAR_COLOR[:3])) > 25**2]
+
+
+def test_dark_palette_draws_light_strokes_and_exports_stay_light():
+    from exporters.shape_images import BAR_COLOR, DARK, render_shape_png, render_sketch
+
+    def colors(png_bytes):
+        from io import BytesIO
+
+        from PIL import Image
+
+        data = Image.open(BytesIO(png_bytes)).convert("RGBA").tobytes()
+        return {(r, g, b) for r, g, b, a in zip(data[0::4], data[1::4], data[2::4], data[3::4]) if a == 255}
+
+    shape = Stirrup(220, 420)
+    light, dark = colors(render_shape_png(shape, 320, 120, N3)), colors(render_shape_png(shape, 320, 120, N3, True))
+    assert BAR_COLOR[:3] in light and DARK.bar[:3] not in light  # lo predeterminado (planillas, Excel, PDF) es claro
+    assert DARK.bar[:3] in dark and BAR_COLOR[:3] not in dark and DARK.hook[:3] in dark
+    couplers = render_sketch(StraightBar(3000, coupler_end="long").sketch(N5), 320, 120, dark=True)
+    assert DARK.coupler_fill[:3] in colors_of(couplers)
+
+
+def colors_of(image):
+    data = image.tobytes()
+    return {(r, g, b) for r, g, b, a in zip(data[0::4], data[1::4], data[2::4], data[3::4]) if a == 255}

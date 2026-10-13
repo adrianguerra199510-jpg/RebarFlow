@@ -8,8 +8,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
-    QDockWidget, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QSplitter, QStyle,
-    QTabWidget, QToolBar, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QApplication, QDockWidget, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QSplitter,
+    QStyle, QTabWidget, QToolBar, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from core.element import ElementType, StructuralElement
@@ -18,7 +18,9 @@ from core.serialization import FILE_SUFFIX, load_project, save_project
 from engine.bbs_calculator import BBSCalculator, BBSResult, ScheduleLine, dimension_labels
 from exporters.excel_exporter import ExcelExporter
 from exporters.pdf_exporter import PdfExporter
+from gui import style
 from gui.dialogs import BarDialog, ElementDialog, ProjectDialog
+from gui.icon import theme_icon
 from gui.tables import CuttingPlanTable, ScheduleTable, SummaryView
 from gui.widgets import BarDetailPanel
 from sample_project import build_catalog_project, build_project
@@ -156,6 +158,8 @@ class MainWindow(QMainWindow):
         self.act_detail.setShortcut("F4")
         self.act_detail.setIcon(self.style().standardIcon(sp.SP_FileDialogInfoView))
         self.act_detail.setStatusTip("Muestra u oculta el panel con el dibujo grande y el cálculo de la barra seleccionada")
+        self.act_theme = self._action("Modo nocturno", self.toggle_theme, shortcut="Ctrl+Shift+D",
+                                      tip="Cambia entre la interfaz clara y la nocturna")
 
         toolbar = QToolBar("Principal")
         toolbar.setMovable(False)
@@ -180,8 +184,19 @@ class MainWindow(QMainWindow):
         bar_menu = menu.addMenu("&Barra")
         for action in (self.act_add_bar, self.act_edit_bar, self.act_delete_bar):
             bar_menu.addAction(action)
-        menu.addMenu("&Ver").addAction(self.act_detail)
+        view_menu = menu.addMenu("&Ver")
+        view_menu.addAction(self.act_detail)
+        view_menu.addAction(self.act_theme)
         menu.addMenu("A&yuda").addAction(self.act_about)
+
+        # Botón del tema en la esquina superior derecha, a la altura de la barra de menús.
+        self.theme_button = QToolButton()
+        self.theme_button.setObjectName("themeButton")
+        self.theme_button.setDefaultAction(self.act_theme)
+        self.theme_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.theme_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        menu.setCornerWidget(self.theme_button, Qt.Corner.TopRightCorner)
+        self._update_theme_action()
 
         # Ins / Supr actúan sobre la lista de barras cuando tiene el foco.
         for action, key in ((self.act_delete_bar, "Delete"), (self.act_edit_bar, "Return")):
@@ -194,6 +209,25 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ estado y refresco
     def current_element(self) -> StructuralElement | None:
         return self._element
+
+    # ------------------------------------------------------------------ tema
+    def _update_theme_action(self) -> None:
+        """El botón ofrece el tema contrario al actual: luna en el claro, sol en el nocturno."""
+        dark = style.current().dark
+        self.act_theme.setText("Modo diurno" if dark else "Modo nocturno")
+        self.act_theme.setIcon(theme_icon(to_dark=not dark))
+
+    def set_dark_mode(self, dark: bool, *, remember: bool = True) -> None:
+        """Aplica el tema claro o nocturno, lo recuerda para la próxima vez y redibuja tablas, esquemas y detalle."""
+        style.apply_theme(QApplication.instance(), dark)
+        if remember:
+            style.remember_dark(dark)
+        self._update_theme_action()
+        line = self.current_line()
+        self.refresh(select_mark=line.mark if line else None)
+
+    def toggle_theme(self) -> None:
+        self.set_dark_mode(not style.current().dark)
 
     def current_line(self) -> ScheduleLine | None:
         rows = self.bars_table.selectionModel().selectedRows()

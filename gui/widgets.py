@@ -14,14 +14,17 @@ from engine.bbs_calculator import ScheduleLine
 from engine.cutting_optimizer import CutPattern
 from exporters.cutting_images import render_pattern_png
 from exporters.shape_images import render_shape_png
+from gui import style
 
 _DPR = 2  # el PNG se genera al doble de resolución para que se vea nítido en pantallas densas
 
 
 def shape_pixmap(shape: ShapeCode, width: int, height: int, rebar: Rebar | None = None) -> QPixmap:
-    """Pixmap del esquema de ``shape`` de ``width`` x ``height`` píxeles lógicos (con ``rebar``, rotula los ganchos)."""
+    """Pixmap del esquema de ``shape`` de ``width`` x ``height`` píxeles lógicos (con ``rebar``, rotula los ganchos).
+
+    Se dibuja con la paleta del tema actual (trazos claros en el modo nocturno)."""
     pixmap = QPixmap()
-    pixmap.loadFromData(render_shape_png(shape, _DPR * width, _DPR * height, rebar))
+    pixmap.loadFromData(render_shape_png(shape, _DPR * width, _DPR * height, rebar, style.current().dark))
     pixmap.setDevicePixelRatio(_DPR)
     return pixmap
 
@@ -29,7 +32,7 @@ def shape_pixmap(shape: ShapeCode, width: int, height: int, rebar: Rebar | None 
 def pattern_pixmap(pattern: CutPattern, width: int, height: int, min_reusable_mm: float = 0.0) -> QPixmap:
     """Pixmap de una barra comercial cortada según ``pattern``."""
     pixmap = QPixmap()
-    pixmap.loadFromData(render_pattern_png(pattern, _DPR * width, _DPR * height, min_reusable_mm))
+    pixmap.loadFromData(render_pattern_png(pattern, _DPR * width, _DPR * height, min_reusable_mm, style.current().dark))
     pixmap.setDevicePixelRatio(_DPR)
     return pixmap
 
@@ -54,7 +57,7 @@ class ShapePreview(QLabel):
 
 
 def _row(label: str, value: str) -> str:
-    return f"<tr><td style='color:#595959; padding-right:10px'>{label}</td><td><b>{value}</b></td></tr>"
+    return f"<tr><td style='color:{style.current().muted}; padding-right:10px'>{label}</td><td><b>{value}</b></td></tr>"
 
 
 class BarDetailPanel(QFrame):
@@ -98,8 +101,9 @@ class BarDetailPanel(QFrame):
             _row("Longitud / peso total", f"{line.total_length_m:,.2f} m · {line.total_weight_kg:,.2f} kg"),
         ]
         html = f"<table cellspacing='3'>{''.join(rows)}</table>"
-        html += "".join(f"<p style='color:#595959'>{escape(note)}</p>" for note in cut.notes)
-        html += "".join(f"<p style='color:#C00000'><b>Aviso:</b> {escape(w)}</p>" for w in cut.warnings)
+        theme = style.current()
+        html += "".join(f"<p style='color:{theme.muted}'>{escape(note)}</p>" for note in cut.notes)
+        html += "".join(f"<p style='color:{theme.red}'><b>Aviso:</b> {escape(w)}</p>" for w in cut.warnings)
         if line.group.description:
             html += f"<p><i>{escape(line.group.description)}</i></p>"
         self.title.setText(f"Marca {escape(line.mark)}  ·  {escape(line.rebar.label)}  ·  {escape(line.rebar.grade.name)}")

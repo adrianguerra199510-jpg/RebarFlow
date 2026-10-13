@@ -38,7 +38,7 @@ def select_element(window: MainWindow, app, name: str, level: str) -> None:
 
 
 def capture_interface(out: Path) -> None:
-    app = create_application([])
+    app = create_application([], dark=False)
     window = MainWindow(build_project())
     window.resize(1560, 920)
     window.show()
@@ -140,6 +140,23 @@ def capture_interface(out: Path) -> None:
     window.bars_table.selectRow(window.bars_table.row_of("ET1"))  # un estribo triangular
     app.processEvents()
     window.grab().save(str(out / "ui_catalogo.png"))
+
+    # Modo nocturno (sin guardar la preferencia): ventana con el catálogo y diálogo de la espiral
+    window.set_dark_mode(True, remember=False)
+    window.bars_table.selectRow(window.bars_table.row_of("E3"))
+    app.processEvents()
+    window.grab().save(str(out / "ui_nocturno.png"))
+    window.tabs.setCurrentIndex(2)
+    app.processEvents()
+    window.grab().save(str(out / "ui_nocturno_resumen.png"))
+    night = BarDialog(window, suggested_mark="ES2")
+    night.bar.setCurrentIndex(night.bar.findData("#3"))
+    night.shape.setCurrentIndex(night.shape.findText("ES · Espiral"))
+    night._widgets["hook_start"].setCurrentIndex(night._widgets["hook_start"].findData(135))
+    night.show()
+    app.processEvents()
+    night.grab().save(str(out / "ui_dialogo_nocturno.png"))
+    window.set_dark_mode(False, remember=False)
 
 
 def _pages(pdf: Path) -> int:

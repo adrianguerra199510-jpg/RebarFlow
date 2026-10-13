@@ -13,6 +13,7 @@ cada texto y deja margen suficiente para que ninguno se corte en el borde de la 
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from functools import lru_cache
 from itertools import pairwise
 from io import BytesIO
@@ -25,26 +26,48 @@ from core.sketch import Box, DimLabel, Sketch
 
 #: Proporción ancho:alto de las celdas de esquema en las planillas (8:3).
 ASPECT = 8 / 3
-BAR_COLOR = (31, 56, 100, 255)
-TEXT_COLOR = (70, 70, 70, 255)
-HOOK_COLOR = (176, 85, 4, 255)
-ANGLE_COLOR = (110, 110, 110, 255)
-GUIDE_COLOR = (150, 150, 150, 255)
-COUPLER_COLOR = (0, 105, 92, 255)
-COUPLER_FILL = (200, 228, 224, 255)
+
+
+@dataclass(frozen=True)
+class Palette:
+    """Colores del esquema: barra, cotas, ganchos, ángulos, líneas de cota y couplers."""
+
+    bar: tuple[int, ...]
+    text: tuple[int, ...]
+    hook: tuple[int, ...]
+    angle: tuple[int, ...]
+    guide: tuple[int, ...]
+    coupler: tuple[int, ...]
+    coupler_fill: tuple[int, ...]
+
+
+#: Para papel y pantalla clara (las planillas exportadas siempre usan esta).
+LIGHT = Palette(bar=(31, 56, 100, 255), text=(70, 70, 70, 255), hook=(176, 85, 4, 255), angle=(110, 110, 110, 255),
+                guide=(150, 150, 150, 255), coupler=(0, 105, 92, 255), coupler_fill=(200, 228, 224, 255))
+#: Para el modo nocturno de la interfaz: trazos claros sobre fondo oscuro.
+DARK = Palette(bar=(205, 220, 245, 255), text=(228, 232, 240, 255), hook=(255, 176, 84, 255),
+               angle=(160, 168, 184, 255), guide=(118, 128, 146, 255), coupler=(110, 214, 198, 255),
+               coupler_fill=(32, 84, 80, 255))
+BAR_COLOR, TEXT_COLOR, HOOK_COLOR, ANGLE_COLOR = LIGHT.bar, LIGHT.text, LIGHT.hook, LIGHT.angle
+GUIDE_COLOR, COUPLER_COLOR, COUPLER_FILL = LIGHT.guide, LIGHT.coupler, LIGHT.coupler_fill
 
 _SUPERSAMPLE = 4
 _DIAGONAL = 0.4  # componente mínima en ambos ejes para colocar un rótulo en diagonal
 _SMALL_FONT = 0.78  # los rótulos de gancho y de ángulo van algo más pequeños que las cotas
 
 
-def render_sketch(sketch: Sketch, width: int, height: int, *, bar_color: tuple[int, ...] = BAR_COLOR,
-                  text_color: tuple[int, ...] = TEXT_COLOR, ref_height: int | None = None) -> Image.Image:
+def render_sketch(sketch: Sketch, width: int, height: int, *, bar_color: tuple[int, ...] | None = None,
+                  text_color: tuple[int, ...] | None = None, ref_height: int | None = None,
+                  dark: bool = False) -> Image.Image:
     """Dibuja ``sketch`` en una imagen RGBA transparente de ``width`` x ``height`` píxeles.
 
     ``ref_height`` fija la altura de referencia que escala el texto y el trazo; por defecto la altura
-    de la imagen con un tope de 150 px, para que los dibujos grandes no engrosen sin límite.
+    de la imagen con un tope de 150 px, para que los dibujos grandes no engrosen sin límite. Con ``dark``
+    usa la paleta clara-sobre-oscuro del modo nocturno (``bar_color`` y ``text_color`` la sustituyen).
     """
+    palette = DARK if dark else LIGHT
+    bar_color = bar_color or palette.bar
+    text_color = text_color or palette.text
     ss = _SUPERSAMPLE
     w, h = width * ss, height * ss
     ref = (ref_height or min(height, 150)) * ss
@@ -53,7 +76,7 @@ def render_sketch(sketch: Sketch, width: int, height: int, *, bar_color: tuple[i
     fonts = {"dim": ImageFont.load_default(size=font_px)}
     small = ImageFont.load_default(size=max(7 * ss, round(font_px * _SMALL_FONT)))
     fonts["hook"] = fonts["angle"] = fonts["coupler"] = small
-    colors = {"dim": text_color, "hook": HOOK_COLOR, "angle": ANGLE_COLOR, "coupler": COUPLER_COLOR}
+    colors = {"dim": text_color, "hook": palette.hook, "angle": palette.angle, "coupler": palette.coupler}
     line_w = max(3 * ss, round(ref * 0.05))
     gap = line_w // 2 + 3 * ss
 
@@ -148,7 +171,7 @@ def render_sketch(sketch: Sketch, width: int, height: int, *, bar_color: tuple[i
             for start in range(0, int(length), dash + blank):
                 a, b = start / length, min(start + dash, length) / length
                 draw.line((x0 + (x1 - x0) * a, y0 + (y1 - y0) * a, x0 + (x1 - x0) * b, y0 + (y1 - y0) * b),
-                          fill=GUIDE_COLOR, width=max(ss, line_w // 4))
+                          fill=palette.guide, width=max(ss, line_w // 4))
 
     for path in sketch.paths:
         pixels = [to_px(p) for p in path]
@@ -157,7 +180,8 @@ def render_sketch(sketch: Sketch, width: int, height: int, *, bar_color: tuple[i
             draw.ellipse((x - line_w / 2, y - line_w / 2, x + line_w / 2, y + line_w / 2), fill=bar_color)
 
     for box in sketch.boxes:  # couplers: rectángulos sobre el extremo de la barra
-        draw.polygon(coupler_corners(box, to_px), fill=COUPLER_FILL, outline=COUPLER_COLOR, width=max(ss, line_w // 3))
+        draw.polygon(coupler_corners(box, to_px), fill=palette.coupler_fill, outline=palette.coupler,
+                     width=max(ss, line_w // 3))
 
     for label, (_, anchor, pos) in zip([*sketch.labels, *(lab for lab, _ in box_labels())], layout(to_px)):
         draw.text(pos, label.text, fill=colors[label.kind], font=fonts[label.kind], anchor=anchor)
@@ -166,11 +190,12 @@ def render_sketch(sketch: Sketch, width: int, height: int, *, bar_color: tuple[i
 
 
 @lru_cache(maxsize=2048)
-def render_shape_png(shape: ShapeCode, width: int = 320, height: int = 120, rebar: Rebar | None = None) -> bytes:
+def render_shape_png(shape: ShapeCode, width: int = 320, height: int = 120, rebar: Rebar | None = None,
+                     dark: bool = False) -> bytes:
     """PNG (bytes) del esquema de ``shape``; con ``rebar`` rotula también el largo de los ganchos.
 
-    Se guarda en caché por forma, tamaño y barra.
+    Se guarda en caché por forma, tamaño, barra y paleta (``dark`` es solo para la interfaz en modo nocturno).
     """
     buffer = BytesIO()
-    render_sketch(shape.sketch(rebar), width, height).save(buffer, format="PNG", optimize=True)
+    render_sketch(shape.sketch(rebar), width, height, dark=dark).save(buffer, format="PNG", optimize=True)
     return buffer.getvalue()

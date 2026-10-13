@@ -13,17 +13,19 @@ from PySide6.QtWidgets import (
 from core.coupler import coupler_label
 from engine.bbs_calculator import BBSResult, ElementSchedule, ScheduleLine
 from engine.cutting_report import plan_rows, plan_title, stock_comparison
+from gui import style
 from gui.widgets import pattern_pixmap, shape_pixmap
 
 IMG_W, IMG_H = 176, 66
-_BAND = QColor("#D9E1F2")
-_SUBTOTAL = QColor("#F2F2F2")
-_NAVY = QColor("#1F3864")
-_RED = QColor("#C00000")
 
 _LEFT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 _RIGHT = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 _CENTER = Qt.AlignmentFlag.AlignCenter
+
+
+def _color(name: str) -> QColor:
+    """Color del tema actual (``band``, ``subtotal``, ``header``, ``red``, ``green``…)."""
+    return QColor(getattr(style.current(), name))
 
 
 def _item(text: object, align=_LEFT, *, bold: bool = False, fg: QColor | None = None, bg: QColor | None = None):
@@ -91,7 +93,7 @@ class ScheduleTable(QTableWidget):
             if self.grouped:
                 band = f"{element.name}  ·  {element.element_type.value}  ·  {element.level}  ·  {element.quantity} und"
                 self.setSpan(row, 0, 1, n_cols)
-                self.setItem(row, 0, _item(band, bold=True, bg=_BAND))
+                self.setItem(row, 0, _item(band, bold=True, bg=_color("band")))
                 self.setRowHeight(row, 26)
                 row += 1
             for line in schedule.lines:
@@ -99,16 +101,16 @@ class ScheduleTable(QTableWidget):
                 self._lines[row] = line
                 row += 1
             self.setSpan(row, 0, 1, col["Total barras"] + 1)
-            self.setItem(row, 0, _item(f"Subtotal {element.name}", _RIGHT, bold=True, bg=_SUBTOTAL))
-            self._fill_totals(row, col, schedule.total_length_m, schedule.total_weight_kg, _SUBTOTAL, None)
+            self.setItem(row, 0, _item(f"Subtotal {element.name}", _RIGHT, bold=True, bg=_color("subtotal")))
+            self._fill_totals(row, col, schedule.total_length_m, schedule.total_weight_kg, _color("subtotal"), None)
             self.setRowHeight(row, 26)
             row += 1
         if self.grouped and schedules:
             length = sum(s.total_length_m for s in schedules)
             weight = sum(s.total_weight_kg for s in schedules)
             self.setSpan(row, 0, 1, col["Total barras"] + 1)
-            self.setItem(row, 0, _item("TOTAL GENERAL", _RIGHT, bold=True, fg=QColor("white"), bg=_NAVY))
-            self._fill_totals(row, col, length, weight, _NAVY, QColor("white"))
+            self.setItem(row, 0, _item("TOTAL GENERAL", _RIGHT, bold=True, fg=QColor(style.current().header_text), bg=_color("header")))
+            self._fill_totals(row, col, length, weight, _color("header"), QColor(style.current().header_text))
             self.setRowHeight(row, 28)
 
         widths = {"Marca": 60, "Barra": 54, "Esquema": IMG_W + 16, "Cant. por elem.": 76,
@@ -124,7 +126,7 @@ class ScheduleTable(QTableWidget):
     def _fill_line(self, row: int, line: ScheduleLine, col: dict[str, int], dim_labels: list[str]) -> None:
         dims = line.shape.dimensions()
         self.setRowHeight(row, IMG_H + 8)
-        mark = _item(line.mark, _CENTER, bold=True, fg=_RED if line.warnings else None)
+        mark = _item(line.mark, _CENTER, bold=True, fg=_color("red") if line.warnings else None)
         if line.warnings:  # el aviso de norma sale en la marca (en rojo) y en el detalle de la barra
             mark.setToolTip("\n".join(f"AVISO: {w}" for w in line.warnings))
         self.setItem(row, col["Marca"], mark)
@@ -177,7 +179,7 @@ def _data_table(headers: list[str], rows: list[list[str]], total: list[str] | No
     for r, values in enumerate(rows + ([total] if total is not None else [])):
         is_total = total is not None and r == len(rows)
         for c, value in enumerate(values):
-            table.setItem(r, c, _item(value, _LEFT if c == 0 else _RIGHT, bold=is_total, bg=_SUBTOTAL if is_total else None))
+            table.setItem(r, c, _item(value, _LEFT if c == 0 else _RIGHT, bold=is_total, bg=_color("subtotal") if is_total else None))
         table.setRowHeight(r, 26)
     table.setFixedHeight(42 + 26 * table.rowCount() + 4)
     return table
@@ -298,7 +300,7 @@ class CuttingPlanTable(QTableWidget):
         row = 0
         for summary in summaries:
             self.setSpan(row, 0, 1, len(self.HEADERS))
-            self.setItem(row, 0, _item(plan_title(summary), bold=True, bg=_BAND))
+            self.setItem(row, 0, _item(plan_title(summary), bold=True, bg=_color("band")))
             self.setRowHeight(row, 28)
             row += 1
             rows = plan_rows(summary)
@@ -313,19 +315,19 @@ class CuttingPlanTable(QTableWidget):
                 picture.setIcon(QIcon(pattern_pixmap(item.pattern, self.PLAN_W, self.PLAN_H, summary.reusable_remnant_mm)))
                 values = (_item(item.step, _CENTER), _item(item.bars_text, _CENTER), _item(item.count, _CENTER), picture,
                           _item(item.cuts_text), _item(item.marks_text), _item(f"{item.remnant_mm:,.0f}", _RIGHT),
-                          _item(item.remnant_use, _CENTER, fg=QColor("#2F6B2F") if item.remnant_use == "Reutilizable" else None))
+                          _item(item.remnant_use, _CENTER, fg=_color("green") if item.remnant_use == "Reutilizable" else None))
                 for column, cell in enumerate(values):
                     self.setItem(row, column, cell)
                 self.setRowHeight(row, self.PLAN_H + 10)
                 row += 1
             self.setSpan(row, 0, 1, 2)
-            self.setItem(row, 0, _item("Total", _RIGHT, bold=True, bg=_SUBTOTAL))
-            self.setItem(row, 2, _item(summary.plan.stock_bars, _CENTER, bold=True, bg=_SUBTOTAL))
+            self.setItem(row, 0, _item("Total", _RIGHT, bold=True, bg=_color("subtotal")))
+            self.setItem(row, 2, _item(summary.plan.stock_bars, _CENTER, bold=True, bg=_color("subtotal")))
             self.setSpan(row, 4, 1, len(self.HEADERS) - 4)
             self.setItem(row, 4, _item(
                 f"Sobrante {summary.waste_length_m:,.2f} m  ·  reutilizable {summary.reusable_length_m:,.2f} m  ·  "
-                f"desperdicio {summary.scrap_length_m:,.2f} m", bold=True, bg=_SUBTOTAL))
-            self.setItem(row, 3, _item("", bg=_SUBTOTAL))
+                f"desperdicio {summary.scrap_length_m:,.2f} m", bold=True, bg=_color("subtotal")))
+            self.setItem(row, 3, _item("", bg=_color("subtotal")))
             self.setRowHeight(row, 26)
             row += 1
         for column, width in enumerate((50, 70, 54, self.PLAN_W + 16, 230, 230, 80, 100)):
