@@ -128,7 +128,7 @@ def capture_interface(out: Path) -> None:
     coupled.shape.setCurrentIndex(coupled.shape.findText("ES · Espiral"))
     coupled._widgets["supply_mode"].setCurrentIndex(coupled._widgets["supply_mode"].findData("bars"))
     coupled._widgets["joint"].setCurrentIndex(coupled._widgets["joint"].findData("coupler"))
-    coupled._widgets["joint_coupler"].setCurrentIndex(coupled._widgets["joint_coupler"].findData("long"))
+    coupled._widgets["joint_threads"].setCurrentIndex(coupled._widgets["joint_threads"].findData("long_short"))
     coupled.show()
     app.processEvents()
     coupled.grab().save(str(out / "ui_dialogo_espiral_coupler.png"))
@@ -158,6 +158,13 @@ def capture_interface(out: Path) -> None:
     window.bars_table.selectRow(window.bars_table.row_of("ET1"))  # un estribo triangular
     app.processEvents()
     window.grab().save(str(out / "ui_catalogo.png"))
+
+    # Marca dividida en sub-marcas (ES4 → ES4.1, ES4.2, ES4.3), cada una con las roscas de sus extremos
+    row = window.bars_table.row_of("ES4")
+    window.bars_table.scrollToItem(window.bars_table.item(row, 0), window.bars_table.ScrollHint.PositionAtTop)
+    window.bars_table.selectRow(row + 2)
+    app.processEvents()
+    window.grab().save(str(out / "ui_subbarras.png"))
 
     # Obra sin niveles: el paso inferior de ejemplo, agrupado por estructura y subestructura
     window.open_bridge()

@@ -31,7 +31,7 @@ import math
 from dataclasses import dataclass, replace
 from typing import ClassVar
 
-from core.coupler import COUPLER_CHOICES, COUPLER_NONE, coupler_text
+from core.coupler import COUPLER_CHOICES
 from core.cutlength import CutLength, Supply
 from core.geometry import GeometryError
 from core.params import param
@@ -50,9 +50,11 @@ from core.splice import (
     JOINT_CHOICES,
     JOINT_COUPLER,
     JOINT_LAP,
-    coupler_pieces,
-    lap_pieces,
-    standard_lap_mm,
+    JOINT_THREAD_CHOICES,
+    THREADS_LONG_LONG,
+    THREADS_LONG_SHORT,
+    THREADS_SHORT_SHORT,
+    joined_supply,
 )
 from core.shape_codes import (
     HOOK_CHOICES,
@@ -95,8 +97,8 @@ class HookedBar(OpenPolyShape):
     ext_end: float | None = param("Extensión del gancho final", "length", None, optional=True)
     opposite: int = param("Orientación de los ganchos", "choice", 0, choices=SIDE_CHOICES)
     style: str = param("Estilo", "choice", "main", choices=STYLE_CHOICES)
-    coupler_start: str = param("Coupler inicial (solo sin gancho)", "choice", "none", choices=COUPLER_CHOICES)
-    coupler_end: str = param("Coupler final (solo sin gancho)", "choice", "none", choices=COUPLER_CHOICES)
+    coupler_start: str = param("Rosca inicial (solo sin gancho)", "choice", "none", choices=COUPLER_CHOICES)
+    coupler_end: str = param("Rosca final (solo sin gancho)", "choice", "none", choices=COUPLER_CHOICES)
 
     def dimensions(self) -> dict[str, float]:
         return {"A": self.a}
@@ -149,8 +151,8 @@ class ZBar(OpenPolyShape):
     b: float = param("B · pata central", default=200.0)
     c: float = param("C · segundo tramo", default=250.0)
     style: str = param("Estilo", "choice", "main", choices=STYLE_CHOICES)
-    coupler_start: str = param("Coupler inicial", "choice", "none", choices=COUPLER_CHOICES)
-    coupler_end: str = param("Coupler final", "choice", "none", choices=COUPLER_CHOICES)
+    coupler_start: str = param("Rosca inicial", "choice", "none", choices=COUPLER_CHOICES)
+    coupler_end: str = param("Rosca final", "choice", "none", choices=COUPLER_CHOICES)
 
     def dimensions(self) -> dict[str, float]:
         return {"A": self.a, "B": self.b, "C": self.c}
@@ -177,8 +179,8 @@ class CrankBar(OpenPolyShape):
     c: float = param("C · segundo tramo", default=600.0)
     angle: float = param("Ángulo de los dobleces", "angle", 45.0, minimum=5.0, maximum=85.0)
     style: str = param("Estilo", "choice", "main", choices=STYLE_CHOICES)
-    coupler_start: str = param("Coupler inicial", "choice", "none", choices=COUPLER_CHOICES)
-    coupler_end: str = param("Coupler final", "choice", "none", choices=COUPLER_CHOICES)
+    coupler_start: str = param("Rosca inicial", "choice", "none", choices=COUPLER_CHOICES)
+    coupler_end: str = param("Rosca final", "choice", "none", choices=COUPLER_CHOICES)
 
     def dimensions(self) -> dict[str, float]:
         return {"A": self.a, "B": self.b, "C": self.c}
@@ -209,8 +211,8 @@ class OmegaBar(OpenPolyShape):
     d: float = param("D · pata derecha", default=300.0)
     e: float = param("E · ala derecha", default=200.0)
     style: str = param("Estilo", "choice", "main", choices=STYLE_CHOICES)
-    coupler_start: str = param("Coupler inicial", "choice", "none", choices=COUPLER_CHOICES)
-    coupler_end: str = param("Coupler final", "choice", "none", choices=COUPLER_CHOICES)
+    coupler_start: str = param("Rosca inicial", "choice", "none", choices=COUPLER_CHOICES)
+    coupler_end: str = param("Rosca final", "choice", "none", choices=COUPLER_CHOICES)
 
     def dimensions(self) -> dict[str, float]:
         return {"A": self.a, "B": self.b, "C": self.c, "D": self.d, "E": self.e}
@@ -441,7 +443,6 @@ class RingTie(ShapeCode):
 SUPPLY_COIL = "coil"
 SUPPLY_BARS = "bars"
 SPIRAL_SUPPLY_CHOICES = ((SUPPLY_COIL, "Carrete (rollo continuo)"), (SUPPLY_BARS, "Barras individuales"))
-JOINT_COUPLER_CHOICES = tuple(choice for choice in COUPLER_CHOICES if choice[0] != COUPLER_NONE)
 
 
 @register_shape
@@ -459,7 +460,8 @@ class Spiral(ShapeCode):
 
     **Suministro.** La espiral puede llegar en ``coil`` (carrete: un solo alambre continuo, sin retales) o armarse con
     ``bars`` (barras individuales). Con barras, si el desarrollo supera la barra comercial se une con ``joint``:
-    ``lap`` (traslape; el acero crece un traslape por unión) o ``coupler`` (barras a tope con un coupler por unión).
+    ``lap`` (traslape; el acero crece un traslape por unión) o ``coupler`` (barras a tope con un acoplador por unión, cuyas
+    roscas se eligen con ``joint_threads``). La pieza se divide en sub-marcas (``A1.1``, ``A1.2``…).
     """
 
     code: ClassVar[str] = "ES"
@@ -484,7 +486,7 @@ class Spiral(ShapeCode):
     lap_mm: float | None = param("Longitud del traslape", "length", None, optional=True,
                                  depends=(("supply_mode", SUPPLY_BARS), ("joint", JOINT_LAP)),
                                  auto_text="estándar (48·d, mín. 300 mm)")
-    joint_coupler: str = param("Tipo de coupler de la unión", "choice", "short", choices=JOINT_COUPLER_CHOICES,
+    joint_threads: str = param("Roscas de la unión", "choice", THREADS_LONG_SHORT, choices=JOINT_THREAD_CHOICES,
                                depends=(("supply_mode", SUPPLY_BARS), ("joint", JOINT_COUPLER)))
 
     @classmethod
@@ -494,6 +496,9 @@ class Spiral(ShapeCode):
             turns = migrated.pop("extra_turns")
             migrated.setdefault("turns_start", turns)
             migrated.setdefault("turns_end", turns)
+        if "joint_coupler" in migrated:  # antes: un solo «tipo de coupler» para la unión; ahora, la rosca de cada extremo
+            kind = migrated.pop("joint_coupler")
+            migrated.setdefault("joint_threads", THREADS_LONG_LONG if kind == "long" else THREADS_SHORT_SHORT)
         return migrated
 
     def dimensions(self) -> dict[str, float]:
@@ -541,25 +546,8 @@ class Spiral(ShapeCode):
             return Supply((total,), coil=True, notes=("Suministro: carrete (rollo continuo), sin uniones",))
         if total <= stock_length_mm + 1e-6:
             return Supply((total,), notes=("Suministro: una barra individual, sin uniones",))
-        if self.joint == JOINT_COUPLER:
-            pieces = coupler_pieces(total, stock_length_mm)
-            couplers = (self.joint_coupler,) * (len(pieces) - 1)
-            return Supply(
-                pieces, couplers=couplers,
-                notes=(f"Suministro: {len(pieces)} barras unidas a tope con {coupler_text(couplers)}",),
-            )
-        standard = standard_lap_mm(rebar)
-        lap = standard if self.lap_mm is None else self.lap_mm
-        pieces = lap_pieces(total, stock_length_mm, lap)
-        warnings = ()
-        if lap < standard - 1e-6:
-            warnings = (f"Traslape de {lap:.0f} mm menor que el de norma para espirales "
-                        f"(48·d, mín. 300 mm = {standard:.0f} mm; ACI 318)",)
-        return Supply(
-            pieces, warnings=warnings,
-            notes=(f"Suministro: {len(pieces)} barras con {len(pieces) - 1} traslapes de {lap:.0f} mm "
-                   f"(el acero crece {(len(pieces) - 1) * lap / 1000:.2f} m por espiral)",),
-        )
+        return joined_supply(rebar, total, stock_length_mm, joint=self.joint, lap_mm=self.lap_mm,
+                             threads=self.joint_threads)
 
     def sketch(self, rebar: Rebar | None = None) -> Sketch:
         width, height = proportional([self.diameter, self.height], 0.6)
@@ -628,8 +616,8 @@ class CustomBar(OpenPolyShape):
     ext_end: float | None = param("Extensión del gancho final", "length", None, optional=True)
     opposite: int = param("Orientación de los ganchos", "choice", 0, choices=SIDE_CHOICES)
     style: str = param("Estilo", "choice", "main", choices=STYLE_CHOICES)
-    coupler_start: str = param("Coupler inicial (solo sin gancho)", "choice", "none", choices=COUPLER_CHOICES)
-    coupler_end: str = param("Coupler final (solo sin gancho)", "choice", "none", choices=COUPLER_CHOICES)
+    coupler_start: str = param("Rosca inicial (solo sin gancho)", "choice", "none", choices=COUPLER_CHOICES)
+    coupler_end: str = param("Rosca final (solo sin gancho)", "choice", "none", choices=COUPLER_CHOICES)
 
     def validate(self) -> None:
         if len(self.angles) != len(self.legs) - 1:

@@ -34,7 +34,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, fields, replace
 from typing import ClassVar, TypeVar
 
-from core.coupler import COUPLER_CHOICES  # noqa: F401 (se reexporta)
+from core.coupler import COUPLER_CHOICES, COUPLER_NONE  # noqa: F401 (se reexporta)
 from core.cutlength import CutLength, HookInfo, Supply  # noqa: F401 (se reexportan)
 from core.geometry import GeometryError  # noqa: F401
 from core.params import DEFAULT_LENGTH_MM, ParamSpec, param, validate_param  # noqa: F401
@@ -48,6 +48,7 @@ from core.polybar import (  # noqa: F401
     open_polyline_sketch,
 )
 from core.rebar import BendUse, HookType, Rebar
+from core.splice import JOINT_CHOICES, JOINT_COUPLER, JOINT_LAP, JOINT_THREAD_CHOICES, THREADS_LONG_SHORT, joined_supply
 from core.sketch import DimLabel, Sketch, format_dimension
 
 _EPS = 1e-6
@@ -237,19 +238,38 @@ class StraightBar(OpenPolyShape):
 
     code: ClassVar[str] = "R"
     name: ClassVar[str] = "Recta"
-    description: ClassVar[str] = "Barra recta sin dobleces; admite un coupler (rosca corta o larga) en cada extremo."
+    description: ClassVar[str] = (
+        "Barra recta sin dobleces; admite rosca para acoplador (corta o larga) en cada extremo. Si es más larga que la "
+        "barra comercial se divide en sub-marcas (A1.1, A1.2…) unidas con traslape o acoplador."
+    )
 
     field_labels: ClassVar[dict[str, str]] = {"length": "A · longitud total"}
 
     length: float
-    coupler_start: str = param("Coupler inicial", "choice", "none", choices=COUPLER_CHOICES)
-    coupler_end: str = param("Coupler final", "choice", "none", choices=COUPLER_CHOICES)
+    coupler_start: str = param("Rosca inicial", "choice", "none", choices=COUPLER_CHOICES)
+    coupler_end: str = param("Rosca final", "choice", "none", choices=COUPLER_CHOICES)
+    joint: str = param("Unión si excede la barra comercial", "choice", JOINT_LAP, choices=JOINT_CHOICES)
+    lap_mm: float | None = param("Longitud del traslape", "length", None, optional=True,
+                                 depends=(("joint", JOINT_LAP),), auto_text="estándar (48·d, mín. 300 mm)")
+    joint_threads: str = param("Roscas de la unión", "choice", THREADS_LONG_SHORT, choices=JOINT_THREAD_CHOICES,
+                               depends=(("joint", JOINT_COUPLER),))
 
     def dimensions(self) -> dict[str, float]:
         return {"A": self.length}
 
     def poly(self) -> OpenPoly:
         return OpenPoly((self.length,), coupler_start=self.coupler_start, coupler_end=self.coupler_end)
+
+    def supply(self, rebar: Rebar, stock_length_mm: float) -> Supply:
+        """Una barra recta más larga que la barra comercial se divide en sub-marcas unidas con traslape o acoplador."""
+        total = self.cut_length(rebar).total_mm
+        if total <= stock_length_mm + 1e-6:
+            return Supply((total,))
+        none = COUPLER_NONE
+        return joined_supply(rebar, total, stock_length_mm, joint=self.joint, lap_mm=self.lap_mm,
+                             threads=self.joint_threads,
+                             start_thread="" if self.coupler_start == none else self.coupler_start,
+                             end_thread="" if self.coupler_end == none else self.coupler_end)
 
 
 @register_shape
@@ -259,13 +279,13 @@ class LBar(OpenPolyShape):
 
     code: ClassVar[str] = "L"
     name: ClassVar[str] = "Bastón L"
-    description: ClassVar[str] = "Un doblez a 90°; la pata corta actúa de gancho. El otro extremo admite coupler."
+    description: ClassVar[str] = "Un doblez a 90°; la pata corta actúa de gancho. El otro extremo admite rosca para acoplador."
 
     field_labels: ClassVar[dict[str, str]] = {"a": "A · tramo principal", "b": "B · tramo del gancho"}
 
     a: float
     b: float
-    coupler_start: str = param("Coupler en el extremo de A", "choice", "none", choices=COUPLER_CHOICES)
+    coupler_start: str = param("Rosca en el extremo de A", "choice", "none", choices=COUPLER_CHOICES)
 
     @classmethod
     def with_standard_hook(cls, rebar: Rebar, a: float) -> LBar:

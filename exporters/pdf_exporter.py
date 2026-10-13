@@ -20,8 +20,8 @@ from reportlab.pdfgen import canvas
 from reportlab.platypus import (Image, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table,
                                 TableStyle)
 
-from core.coupler import coupler_label, coupler_legend
-from engine.bbs_calculator import BBSResult, ElementSchedule, ScheduleLine
+from core.coupler import coupler_legend
+from engine.bbs_calculator import BBSResult, ElementSchedule, LinePart, ScheduleLine
 from engine.cutting_report import plan_rows, plan_title, stock_comparison
 from exporters.cutting_images import render_pattern_png
 from exporters.logo import fitted_size
@@ -30,6 +30,7 @@ from exporters.shape_images import render_shape_png
 _NAVY = colors.HexColor("#1F3864")
 _BAND = colors.HexColor("#D9E1F2")
 _SUBTOTAL = colors.HexColor("#F2F2F2")
+_PART = colors.HexColor("#F6F8FC")  # sub-marcas (A1.1, A1.2…)
 _GRID = colors.HexColor("#BFBFBF")
 _RED = "#C00000"
 
@@ -140,10 +141,6 @@ class PdfExporter:
             story += [Paragraph("Avisos", ParagraphStyle("warn_title", parent=_SECTION, textColor=colors.HexColor(_RED)))]
             story += [Paragraph(f'<font color="{_RED}">⚠ {escape(element)} · marca {escape(mark)}: {escape(text)}</font>', _BASE)
                       for element, mark, text in result.warnings]
-        if result.supply_notes:  # espirales armadas con varias barras: cuántas y cómo se unen
-            story += [Paragraph("Suministro con uniones", _SECTION)]
-            story += [Paragraph(f"{escape(element)} · marca {escape(mark)}: {escape(text)}", _BASE)
-                      for element, mark, text in result.supply_notes]
         story += [PageBreak(), *self._summary(result, usable), PageBreak(), *self._cutting_plan(result, usable)]
 
         footer = f"{self.project_name}  ·  {issued}"
@@ -198,8 +195,12 @@ class PdfExporter:
         band = element.heading
         rows: list[list] = [[_p(band, _BOLD_LEFT)] + [""] * (n_cols - 1),
                             [_p(name, _HEADER) for name in names]]
+        part_rows: list[int] = []
         for line in schedule.lines:
             rows.append(self._line_row(line, names))
+            for part in line.parts:  # sub-marcas: las barras en las que se divide la marca (A1.1, A1.2…)
+                part_rows.append(len(rows))
+                rows.append(self._part_row(line, part, names))
 
         subtotal = [""] * n_cols
         subtotal[0] = _p(f"Subtotal {element.name}", _BOLD_RIGHT)
@@ -216,6 +217,7 @@ class PdfExporter:
             ("SPAN", (0, 0), (-1, 0)), ("BACKGROUND", (0, 0), (-1, 0), _BAND),
             ("BACKGROUND", (0, 1), (-1, 1), _NAVY),
             ("SPAN", (0, last), (names.index("Total barras"), last)), ("BACKGROUND", (0, last), (-1, last), _SUBTOTAL),
+            *[("BACKGROUND", (0, r), (-1, r), _PART) for r in part_rows],
         ])
         table = Table(rows, colWidths=[width for _, width in columns], repeatRows=2)
         table.setStyle(style)
@@ -227,15 +229,35 @@ class PdfExporter:
         cells: dict[str, object] = {
             "Marca": _p(line.mark, mark_style),
             "Barra": _p(line.rebar.designation, _CELL_CENTER),
-            "Long. corte (mm)": _p(_n(line.cut_length_mm, 0), _CELL_RIGHT),
             "Cant. por elem.": _p(line.group.quantity, _CELL_CENTER),
             "Total barras": _p(line.total_bars, _CELL_CENTER),
-            "Peso unit. (kg)": _p(_n(line.unit_weight_kg), _CELL_RIGHT),
-            "Long. total (m)": _p(_n(line.total_length_m), _CELL_RIGHT),
-            "Peso total (kg)": _p(_n(line.total_weight_kg), _CELL_RIGHT),
         }
+        if not line.parts:  # una marca dividida en sub-marcas deja los largos y pesos a sus sub-filas
+            cells.update({
+                "Long. corte (mm)": _p(_n(line.cut_length_mm, 0), _CELL_RIGHT),
+                "Peso unit. (kg)": _p(_n(line.unit_weight_kg), _CELL_RIGHT),
+                "Long. total (m)": _p(_n(line.total_length_m), _CELL_RIGHT),
+                "Peso total (kg)": _p(_n(line.total_weight_kg), _CELL_RIGHT),
+            })
         if self.include_shape_images:
             cells["Esquema"] = Image(BytesIO(render_shape_png(line.shape, 3 * _IMG_W, 3 * _IMG_H, line.rebar)),
+                                     width=_IMG_W, height=_IMG_H)
+        return [cells.get(name, "") for name in names]
+
+    def _part_row(self, line: ScheduleLine, part: LinePart, names: list[str]) -> list:
+        """Fila de una sub-marca (``A1.1``): una barra recta con la rosca de cada extremo y sus propios pesos."""
+        cells: dict[str, object] = {
+            "Marca": _p(part.mark, _CELL_CENTER),
+            "Barra": _p(line.rebar.designation, _CELL_CENTER),
+            "Long. corte (mm)": _p(_n(part.length_mm, 0), _CELL_RIGHT),
+            "Cant. por elem.": _p(part.count * line.group.quantity, _CELL_CENTER),
+            "Total barras": _p(part.total_bars, _CELL_CENTER),
+            "Peso unit. (kg)": _p(_n(part.unit_weight_kg), _CELL_RIGHT),
+            "Long. total (m)": _p(_n(part.total_length_m), _CELL_RIGHT),
+            "Peso total (kg)": _p(_n(part.total_weight_kg), _CELL_RIGHT),
+        }
+        if self.include_shape_images:
+            cells["Esquema"] = Image(BytesIO(render_shape_png(part.shape, 3 * _IMG_W, 3 * _IMG_H, line.rebar)),
                                      width=_IMG_W, height=_IMG_H)
         return [cells[name] for name in names]
 
@@ -312,12 +334,13 @@ class PdfExporter:
                       self._data_table(["Barra", "Grado", *[f"{l / 1000:.2f} m" for l in lengths], "Recomendada"], rows, None, usable)]
             number += 1
 
-        couplers = result.coupler_counts()
-        if couplers:
-            story += [Paragraph(f"{number}. Couplers por barra y tipo", _SECTION), self._data_table(
-                ["Barra", "Grado", "Tipo de coupler", "Cantidad"],
-                [[c.rebar.designation, c.rebar.grade.name, coupler_label(c.kind), _n(c.count, 0)] for c in couplers],
-                ["TOTAL", "", "", _n(sum(c.count for c in couplers), 0)], usable)]
+        threads = result.thread_rows()
+        if threads:
+            story += [Paragraph(f"{number}. Acopladores y roscas por barra", _SECTION), self._data_table(
+                ["Barra", "Grado", "Roscas largas", "Roscas cortas", "Acopladores"],
+                [[t.rebar.designation, t.rebar.grade.name, _n(t.long, 0), _n(t.short, 0), _n(t.couplers, 0)] for t in threads],
+                ["TOTAL", "", _n(sum(t.long for t in threads), 0), _n(sum(t.short for t in threads), 0),
+                 _n(sum(t.couplers for t in threads), 0)], usable)]
         return story
 
     # --------------------------------------------------------------- plan de corte

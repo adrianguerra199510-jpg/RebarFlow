@@ -141,7 +141,7 @@ def resolve_hook(rebar: Rebar, use: BendUse, hook: HookSpec) -> tuple[HookInfo, 
 
 
 def _check_couplers(code: str, poly: OpenPoly) -> tuple[str, ...]:
-    """Tipo de coupler de cada extremo que lo lleva; un extremo con gancho no admite coupler."""
+    """Rosca para acoplador de cada extremo que la lleva; un extremo con gancho no admite rosca."""
     found: list[str] = []
     for slot, (kind, hook, tail, name) in enumerate((
         (poly.coupler_start, poly.hook_start, poly.end_hooks[0] and bool(poly.angles), "inicial"),
@@ -150,11 +150,11 @@ def _check_couplers(code: str, poly: OpenPoly) -> tuple[str, ...]:
         if kind == COUPLER_NONE:
             continue
         if kind not in COUPLER_NAMES:
-            raise GeometryError(f"Forma {code}: tipo de coupler desconocido {kind!r}.")
+            raise GeometryError(f"Forma {code}: tipo de rosca desconocido {kind!r}.")
         if hook is not None or tail:
             raise GeometryError(
-                f"Forma {code}: el extremo {name} termina en gancho y no admite coupler "
-                "(elija «Sin gancho» en ese extremo o quite el coupler)."
+                f"Forma {code}: el extremo {name} termina en gancho y no admite rosca para acoplador "
+                "(elija «Sin gancho» en ese extremo o quite la rosca)."
             )
         found.append(kind)
     return tuple(found)

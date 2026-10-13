@@ -22,7 +22,7 @@ from core.project import Project
 from core.rebar import GRADE_40, GRADE_60, GRADE_75, get_rebar, list_rebars
 from core.shape_codes import ShapeCode, available_shapes
 from core.splice import pieces_text
-from engine.bbs_calculator import round_up_to_step
+from engine.bbs_calculator import round_supply
 from exporters.logo import LogoError, normalize_logo
 from gui import style
 from gui.widgets import ShapePreview, shape_pixmap
@@ -597,11 +597,9 @@ class BarDialog(QDialog):
             rebar = get_rebar(self.bar.currentData(), self.grade.currentData())
             group = RebarGroup(mark, rebar, shape, self.quantity.value(), self.description.text().strip())
             cut = group.cut
-            supply = shape.supply(rebar, self._stock)
-            pieces = tuple(round_up_to_step(piece, self._rounding) for piece in supply.pieces_mm)
-            if len(pieces) > 1:
-                pieces = tuple(min(piece, self._stock) for piece in pieces)
-            rounded = sum(pieces)
+            supply = round_supply(shape.supply(rebar, self._stock), self._stock, self._rounding)
+            pieces = supply.pieces_mm
+            rounded = supply.material_mm
             if not supply.coil and max(pieces) > self._stock + 1e-6:
                 raise ValueError(
                     f"La barra mide {max(pieces) / 1000:.2f} m y excede la barra comercial de {self._stock / 1000:.2f} m; "
@@ -620,11 +618,15 @@ class BarDialog(QDialog):
                 html += (f"<br><span style='color:{theme.muted}'>Desarrollo de la forma {cut.total_mm:,.1f} mm; "
                          f"acero por unidad {rounded:,.0f} mm</span>")
                 html += f"<br><b>{len(pieces)} barras: {escape(pieces_text(pieces))}</b>"
+                for sub_mark, part in supply.sub_marks(mark):
+                    detail = f" &nbsp;·&nbsp; {escape(part.thread_text)}" if part.thread_text else ""
+                    html += (f"<br>&nbsp;&nbsp;<b>{escape(sub_mark)}</b> ×{part.count} &nbsp;·&nbsp; "
+                             f"{part.length_mm:,.0f} mm{detail}")
             if cut.hooks:
                 html += f"<br><span style='color:{theme.hook}'>Ganchos (° · mm): {escape(cut.hook_text)}</span>"
-            couplers = cut.couplers + supply.couplers
-            if couplers:
-                html += f"<br><span style='color:{theme.coupler}'>Couplers: {escape(coupler_text(couplers))}</span>"
+            threads = supply.threads if supply.parts else cut.couplers
+            if threads:
+                html += f"<br><span style='color:{theme.coupler}'>Roscas para acoplador: {escape(coupler_text(threads))}</span>"
             html += "".join(f"<br><span style='color:{theme.muted}'>{escape(n)}</span>" for n in cut.notes + supply.notes)
             html += "".join(f"<br><span style='color:{theme.red}'><b>Aviso:</b> {escape(w)}</span>"
                             for w in cut.warnings + supply.warnings)

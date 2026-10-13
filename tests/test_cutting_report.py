@@ -154,7 +154,7 @@ def test_catalog_project_uses_every_builtin_template_and_exports(tmp_path):
     assert element.element_type is ElementType.OTHER
     assert {g.shape.code for g in element.groups} == {"R", "L", "U", "E", "G", "EU", "Z", "Q", "O", "ET", "ETR", "AR", "ES", "X"}
     result = BBSCalculator(project.stock_length_mm, project.length_rounding_mm, project.reusable_remnant_mm).calculate(project.elements)
-    assert len(result.lines) == 25 and result.total_weight_kg > 0
+    assert len(result.lines) == 26 and result.total_weight_kg > 0
     assert not [w for line in result.lines for w in line.warnings]  # el ejemplo cumple los mínimos de la norma
     assert next(line for line in result.lines if line.mark == "ES1").supply.coil
     assert ExcelExporter(project.name).export(result, tmp_path / "c.xlsx").exists()

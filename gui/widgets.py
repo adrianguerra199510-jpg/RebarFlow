@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from html import escape
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QLabel, QToolButton, QVBoxLayout, QWidget
 
 from core.rebar import Rebar
 from core.shape_codes import ShapeCode
-from engine.bbs_calculator import ScheduleLine
+from engine.bbs_calculator import LinePart, ScheduleLine
 from engine.cutting_optimizer import CutPattern
 from exporters.cutting_images import render_pattern_png
 from exporters.shape_images import render_shape_png
@@ -35,6 +36,31 @@ def pattern_pixmap(pattern: CutPattern, width: int, height: int, min_reusable_mm
     pixmap.loadFromData(render_pattern_png(pattern, _DPR * width, _DPR * height, min_reusable_mm, style.current().dark))
     pixmap.setDevicePixelRatio(_DPR)
     return pixmap
+
+
+class ThemeButton(QToolButton):
+    """Botón del tema para la esquina de la barra de menús.
+
+    Su texto cambia («Modo nocturno» / «Modo diurno»); reserva siempre el ancho del más largo, medido con la fuente real
+    del sistema, más un margen, para que Qt no lo recorte con puntos suspensivos («Modo …turno») en Windows, donde la
+    fuente y el escalado de pantalla hacen el texto más ancho que en otros sistemas.
+    """
+
+    _SLACK = 16
+
+    def __init__(self, texts: Sequence[str], parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._texts = tuple(texts)
+
+    def sizeHint(self) -> QSize:  # noqa: N802 (API de Qt)
+        base = super().sizeHint()
+        metrics = self.fontMetrics()
+        widest = max(metrics.horizontalAdvance(text) for text in self._texts)
+        extra = max(0, widest - metrics.horizontalAdvance(self.text()))
+        return QSize(base.width() + extra + self._SLACK, base.height())
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        return self.sizeHint()
 
 
 class ShapePreview(QLabel):
@@ -79,11 +105,16 @@ class BarDetailPanel(QFrame):
         layout.addWidget(self.details, stretch=1)
         self.show_line(None)
 
-    def show_line(self, line: ScheduleLine | None) -> None:
+    def show_line(self, line: ScheduleLine | None, part: LinePart | None = None) -> None:
+        """Dibujo grande y desglose de ``line``; con ``part`` (una sub-marca ``A1.1``) muestra esa barra."""
         if line is None:
             self.title.setText("Detalle de barra")
             self.preview.set_shape(None, "Seleccione una barra\npara ver su esquema y el\ndesglose de la longitud de corte")
             self.details.setText("")
+            return
+        theme = style.current()
+        if part is not None:
+            self._show_part(line, part)
             return
         cut = line.group.cut
         dims = " · ".join(f"{k} = {v:,.0f}" for k, v in line.shape.dimensions().items())
@@ -94,20 +125,36 @@ class BarDetailPanel(QFrame):
             _row("Ajuste por dobleces", f"{cut.bend_adjustment_mm:+,.1f} mm"),
             _row("Ganchos (° · mm)", line.hook_text or "—"),
             _row("Extensiones de gancho", f"{cut.extension_mm:,.1f} mm"),
-            *([_row("Couplers", escape(line.coupler_text))] if line.couplers else []),
+            *([_row("Roscas (acoplador)", escape(line.coupler_text))] if line.couplers else []),
             _row("Longitud de corte", f"{cut.total_mm:,.1f} → {line.cut_length_mm:,.0f} mm" if not line.joint_count else
                  f"{cut.total_mm:,.1f} → {line.cut_length_mm:,.0f} mm (con uniones)"),
-            *([_row("Barras por unidad", f"{line.joint_count + 1}: {escape(line.pieces_text)}")] if line.joint_count else []),
+            *([_row("Sub-marcas", escape(line.parts_text))] if line.parts else []),
             _row("Peso unitario", f"{line.unit_weight_kg:,.2f} kg"),
             _row("Barras", f"{line.group.quantity} × {line.element.quantity} elem. = {line.total_bars}"),
             _row("Longitud / peso total", f"{line.total_length_m:,.2f} m · {line.total_weight_kg:,.2f} kg"),
         ]
         html = f"<table cellspacing='3'>{''.join(rows)}</table>"
-        theme = style.current()
         html += "".join(f"<p style='color:{theme.muted}'>{escape(note)}</p>" for note in line.notes)
         html += "".join(f"<p style='color:{theme.red}'><b>Aviso:</b> {escape(w)}</p>" for w in line.warnings)
         if line.group.description:
             html += f"<p><i>{escape(line.group.description)}</i></p>"
         self.title.setText(f"Marca {escape(line.mark)}  ·  {escape(line.rebar.label)}  ·  {escape(line.rebar.grade.name)}")
         self.preview.set_shape(line.shape, rebar=line.rebar)
+        self.details.setText(html)
+
+    def _show_part(self, line: ScheduleLine, part: LinePart) -> None:
+        theme = style.current()
+        rows = [
+            _row("Sub-marca de", f"{escape(line.mark)} · {escape(line.shape.label)}"),
+            _row("Longitud de corte", f"{part.length_mm:,.0f} mm"),
+            _row("Roscas (acoplador)", escape(part.thread_text) or "sin rosca"),
+            _row("Barras", f"{part.count} × {line.group.quantity} × {line.element.quantity} elem. = {part.total_bars}"),
+            _row("Peso unitario", f"{part.unit_weight_kg:,.2f} kg"),
+            _row("Longitud / peso total", f"{part.total_length_m:,.2f} m · {part.total_weight_kg:,.2f} kg"),
+        ]
+        html = f"<table cellspacing='3'>{''.join(rows)}</table>"
+        html += f"<p style='color:{theme.muted}'>La marca {escape(line.mark)} se arma con {escape(line.parts_text)}.</p>"
+        html += "".join(f"<p style='color:{theme.muted}'>{escape(note)}</p>" for note in line.supply.notes)
+        self.title.setText(f"Marca {escape(part.mark)}  ·  {escape(line.rebar.label)}  ·  {escape(line.rebar.grade.name)}")
+        self.preview.set_shape(part.shape, rebar=line.rebar)
         self.details.setText(html)

@@ -72,5 +72,5 @@ def test_pdf_text_has_no_removed_columns_and_lists_warnings_and_couplers(result,
     for removed in ("Forma", "Ganchos", "Observaciones", "Ø"):
         assert removed not in header
     assert "Avisos" in text and "V-101 · marca E2" in text and "mínimo normativo" in text
-    assert "RC = coupler de rosca corta, RL = coupler de rosca larga" in text
-    assert "Couplers por barra y tipo" in text and "Rosca corta (RC)" in text and "Rosca larga (RL)" in text
+    assert "RC = rosca corta, RL = rosca larga" in text
+    assert "Acopladores y roscas por barra" in text and "Roscas largas" in text and "Roscas cortas" in text

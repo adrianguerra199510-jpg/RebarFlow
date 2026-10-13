@@ -20,12 +20,12 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from itertools import groupby
 
-from core.coupler import COUPLER_ORDER, coupler_text
-from core.cutlength import Supply
+from core.coupler import COUPLER_LONG, COUPLER_NONE, COUPLER_ORDER, COUPLER_SHORT, coupler_count, coupler_text
+from core.cutlength import BarPart, Supply
 from core.element import RebarGroup, StructuralElement
 from core.rebar import Rebar
-from core.shape_codes import ShapeCode
-from core.splice import pieces_text
+from core.shape_codes import ShapeCode, StraightBar
+from core.splice import parts_text, pieces_text
 from engine.cutting_optimizer import CuttingPlan, compare_stock_lengths, optimize_cutting
 
 DEFAULT_STOCK_LENGTH_MM = 12_000.0
@@ -33,11 +33,46 @@ _EPS = 1e-6
 
 
 @dataclass(frozen=True)
+class LinePart:
+    """Sub-marca de una marca dividida en barras (``A1.1``, ``A1.2``…): barras idénticas que se cortan para ella.
+
+    Lleva sus propias cantidades y pesos: los totales de la planilla salen de las sub-marcas, no de la marca que las reúne.
+    ``shape`` es la barra recta que se dibuja, con la rosca de cada extremo.
+    """
+
+    mark: str
+    part: BarPart
+    shape: ShapeCode
+    total_bars: int  # barras de esta sub-marca en todo el proyecto: por unidad x unidades x cantidad de elementos
+    unit_weight_kg: float  # una barra
+    total_length_m: float
+    total_weight_kg: float
+
+    @property
+    def length_mm(self) -> float:
+        return self.part.length_mm
+
+    @property
+    def count(self) -> int:
+        """Barras de esta sub-marca por unidad de la marca."""
+        return self.part.count
+
+    @property
+    def threads(self) -> tuple[str, ...]:
+        return self.part.threads
+
+    @property
+    def thread_text(self) -> str:
+        return self.part.thread_text
+
+
+@dataclass(frozen=True)
 class ScheduleLine:
     """Fila de la planilla: una marca dentro de un elemento.
 
     ``cut_length_mm`` es el acero que consume cada unidad (suma de las barras que la arman, con los traslapes si los
-    hay) y ``supply`` las barras que se cortan para cada una, con sus largos redondeados.
+    hay), ``supply`` las barras que se cortan para cada una, con sus largos redondeados, y ``parts`` las sub-marcas en
+    las que se divide si es más larga que la barra comercial (vacío si no se divide).
     """
 
     element: StructuralElement
@@ -48,6 +83,7 @@ class ScheduleLine:
     total_length_m: float
     total_weight_kg: float
     supply: Supply
+    parts: tuple[LinePart, ...] = ()
 
     @property
     def mark(self) -> str:
@@ -80,13 +116,21 @@ class ScheduleLine:
 
     @property
     def couplers(self) -> tuple[str, ...]:
-        """Tipo de coupler de cada extremo que lo lleva y de cada unión entre barras, por unidad (``"short"``/``"long"``)."""
-        return self.group.cut.couplers + self.supply.couplers
+        """Rosca para acoplador de cada extremo de barra que la lleva, por unidad (``"short"`` / ``"long"``).
+
+        Con la marca dividida en sub-marcas son las de todas sus barras, incluidas las de las uniones por acoplador.
+        """
+        return self.supply.threads if self.supply.parts else self.group.cut.couplers
 
     @property
     def coupler_text(self) -> str:
-        """Couplers de cada unidad como ``"2 × rosca corta"`` (vacío si no lleva)."""
+        """Roscas de cada unidad como ``"2 × rosca corta"`` (vacío si no lleva)."""
         return coupler_text(self.couplers)
+
+    @property
+    def parts_text(self) -> str:
+        """Sub-marcas de la marca como ``"A1.1 ×1 · 12.00 m, A1.2 ×15 · 12.00 m"`` (vacío si no se divide)."""
+        return parts_text(self.mark, (p.part for p in self.parts)) if self.parts else ""
 
     @property
     def pieces_text(self) -> str:
@@ -101,11 +145,27 @@ class ScheduleLine:
 
 @dataclass(frozen=True)
 class CouplerCount:
-    """Cantidad de couplers de un tipo en una barra (designación y grado) de todo el proyecto."""
+    """Cantidad de extremos con rosca de un tipo en una barra (designación y grado) de todo el proyecto."""
 
     rebar: Rebar
     kind: str  # "short" o "long"
     count: int
+
+
+@dataclass(frozen=True)
+class ThreadRow:
+    """Roscas y acopladores de una barra (designación y grado) en todo el proyecto.
+
+    El acoplador es una sola pieza y junta dos extremos roscados: ``couplers`` sale de la cantidad de extremos.
+    """
+
+    rebar: Rebar
+    long: int  # extremos con rosca larga
+    short: int  # extremos con rosca corta
+
+    @property
+    def couplers(self) -> int:
+        return coupler_count(self.long + self.short)
 
 
 @dataclass(frozen=True)
@@ -259,22 +319,20 @@ class BBSResult:
         """Avisos de norma de la planilla como ``(elemento, marca, texto)``."""
         return tuple((line.element.name, line.mark, text) for line in self.lines for text in line.warnings)
 
-    @property
-    def supply_notes(self) -> tuple[tuple[str, str, str], ...]:
-        """Marcas armadas con varias barras unidas, como ``(elemento, marca, texto)``: cuántas barras y qué uniones."""
-        return tuple(
-            (line.element.name, line.mark, f"{line.supply.notes[0].removeprefix('Suministro: ')} → {line.pieces_text}")
-            for line in self.lines if line.joint_count and line.supply.notes
-        )
-
     def coupler_counts(self) -> tuple[CouplerCount, ...]:
-        """Couplers del proyecto por barra y tipo (barras por elemento x cantidad de elementos x extremos con coupler)."""
+        """Extremos con rosca del proyecto por barra y tipo (barras x elementos x extremos roscados de cada barra)."""
         counts: dict[tuple[Rebar, str], int] = {}
         for line in self.lines:
             for kind in line.couplers:
                 counts[(line.rebar, kind)] = counts.get((line.rebar, kind), 0) + line.total_bars
         order = lambda item: (item[0][0].bar_number, item[0][0].grade.fy_mpa, COUPLER_ORDER.index(item[0][1]))  # noqa: E731
         return tuple(CouplerCount(rebar, kind, count) for (rebar, kind), count in sorted(counts.items(), key=order))
+
+    def thread_rows(self) -> tuple[ThreadRow, ...]:
+        """Roscas largas y cortas y acopladores por barra (vacío si ninguna barra lleva rosca)."""
+        counts = {(c.rebar, c.kind): c.count for c in self.coupler_counts()}
+        rebars = sorted({c.rebar for c in self.coupler_counts()}, key=lambda r: (r.bar_number, r.grade.fy_mpa))
+        return tuple(ThreadRow(r, counts.get((r, COUPLER_LONG), 0), counts.get((r, COUPLER_SHORT), 0)) for r in rebars)
 
     @property
     def levels(self) -> tuple[str, ...]:
@@ -312,6 +370,18 @@ def round_up_to_step(value: float, step: float) -> float:
     return math.ceil(value / step - 1e-9) * step
 
 
+def round_supply(supply: Supply, stock_length_mm: float, step_mm: float) -> Supply:
+    """``supply`` con el largo de cada barra redondeado hacia arriba al múltiplo de ``step_mm``.
+
+    Las barras de una pieza armada con varias nunca pasan de la barra comercial. Una sola barra más larga que la
+    comercial se deja tal cual para que el cálculo avise del error.
+    """
+    if supply.parts:
+        return supply.with_part_lengths(tuple(min(round_up_to_step(p.length_mm, step_mm), stock_length_mm)
+                                              for p in supply.parts))
+    return replace(supply, pieces_mm=tuple(round_up_to_step(p, step_mm) for p in supply.pieces_mm))
+
+
 def count_stock_bars(pieces: Mapping[float, int], stock_length_mm: float) -> int:
     """Barras comerciales necesarias para cortar ``pieces`` ({longitud mm: cantidad}) con el plan optimizado."""
     return optimize_cutting(pieces, stock_length_mm).stock_bars
@@ -347,6 +417,13 @@ class BBSCalculator:
             ElementSchedule(element, tuple(self._build_line(element, g) for g in element.groups))
             for element in elements
         )
+        for schedule in schedules:  # una sub-marca (A1.1) no puede llamarse como otra marca del mismo elemento
+            marks = {line.mark for line in schedule.lines}
+            for line in schedule.lines:
+                clash = next((p.mark for p in line.parts if p.mark in marks), None)
+                if clash:
+                    raise ValueError(f"{schedule.element.name}: la sub-marca {clash} de la marca {line.mark} coincide con "
+                                     f"otra marca del elemento; cambie el nombre de una de las dos.")
 
         lines = [line for schedule in schedules for line in schedule.lines]
         sort_key = lambda line: (line.rebar.bar_number, line.rebar.grade.fy_mpa)  # noqa: E731
@@ -360,9 +437,12 @@ class BBSCalculator:
                 if line.supply.coil:
                     coil_length_m += line.total_length_m
                     continue
-                name = f"{line.element.name}/{line.mark}"
-                for length, per_unit in Counter(line.supply.pieces_mm).items():
-                    pieces[length] = pieces.get(length, 0) + per_unit * line.total_bars
+                # una marca dividida aporta las barras de cada sub-marca; una sola barra, la suya
+                cuts = ([(f"{line.element.name}/{part.mark}", part.length_mm, part.total_bars) for part in line.parts]
+                        or [(f"{line.element.name}/{line.mark}", length, per_unit * line.total_bars)
+                            for length, per_unit in Counter(line.supply.pieces_mm).items()])
+                for name, length, bars in cuts:
+                    pieces[length] = pieces.get(length, 0) + bars
                     if name not in marks.setdefault(length, []):
                         marks[length].append(name)
             summaries.append(
@@ -381,19 +461,30 @@ class BBSCalculator:
         return BBSResult(schedules, tuple(summaries), self.stock_length_mm, self.group_label)
 
     def _build_line(self, element: StructuralElement, group: RebarGroup) -> ScheduleLine:
-        supply = group.shape.supply(group.rebar, self.stock_length_mm)
-        rounded = tuple(round_up_to_step(piece, self.length_rounding_mm) for piece in supply.pieces_mm)
-        if len(rounded) > 1:  # las barras de una pieza armada nunca pasan de la comercial
-            rounded = tuple(min(piece, self.stock_length_mm) for piece in rounded)
-        supply = replace(supply, pieces_mm=rounded)
+        supply = round_supply(group.shape.supply(group.rebar, self.stock_length_mm), self.stock_length_mm,
+                              self.length_rounding_mm)
         cut_mm = supply.material_mm
-        if not supply.coil and max(rounded) > self.stock_length_mm + _EPS:
+        longest = max(supply.pieces_mm)
+        if not supply.coil and longest > self.stock_length_mm + _EPS:
             raise ValueError(
-                f"{element.name} / marca {group.mark}: la barra mide {max(rounded) / 1000:.2f} m y excede la barra "
+                f"{element.name} / marca {group.mark}: la barra mide {longest / 1000:.2f} m y excede la barra "
                 f"comercial de {self.stock_length_mm / 1000:.2f} m; divídala en barras traslapadas."
             )
         total_bars = group.quantity * element.quantity
         unit_weight = group.rebar.mass_for_length(cut_mm / 1000.0)
+        parts = tuple(
+            LinePart(
+                mark=sub_mark,
+                part=part,
+                shape=StraightBar(part.length_mm, coupler_start=part.start_thread or COUPLER_NONE,
+                                  coupler_end=part.end_thread or COUPLER_NONE),
+                total_bars=part.count * total_bars,
+                unit_weight_kg=group.rebar.mass_for_length(part.length_mm / 1000.0),
+                total_length_m=part.count * total_bars * part.length_mm / 1000.0,
+                total_weight_kg=part.count * total_bars * group.rebar.mass_for_length(part.length_mm / 1000.0),
+            )
+            for sub_mark, part in supply.sub_marks(group.mark)
+        )
         return ScheduleLine(
             element=element,
             group=group,
@@ -403,6 +494,7 @@ class BBSCalculator:
             total_length_m=total_bars * cut_mm / 1000.0,
             total_weight_kg=total_bars * unit_weight,
             supply=supply,
+            parts=parts,
         )
 
     @staticmethod

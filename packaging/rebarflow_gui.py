@@ -66,9 +66,10 @@ def self_test(folder: Path) -> int:
         window.close_project()
         window.select_project(1)
         app.processEvents()
-        spirals = [line for line in window.result.lines if line.mark in ("ES3", "ES4")]
-        report.append("espirales de barras: " + "; ".join(f"{l.mark} {l.pieces_text} ({l.coupler_text or 'traslapes'})"
-                                                             for l in spirals))
+        split = [line for line in window.result.lines if line.parts]
+        report.append("marcas divididas en sub-marcas: " + "; ".join(f"{line.mark}: {line.parts_text}" for line in split))
+        if not split or not window.result.thread_rows():
+            raise RuntimeError("las uniones por acoplador no generaron sub-marcas")
         # Modo nocturno (sin guardar la preferencia): el botón de la esquina superior derecha cambia toda la interfaz.
         from gui import style
 

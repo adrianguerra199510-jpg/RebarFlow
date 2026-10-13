@@ -10,8 +10,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QHeaderView, QLabel, QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from core.coupler import coupler_label
-from engine.bbs_calculator import BBSResult, ElementSchedule, ScheduleLine
+from engine.bbs_calculator import BBSResult, ElementSchedule, LinePart, ScheduleLine
 from engine.cutting_report import plan_rows, plan_title, stock_comparison
 from gui import style
 from gui.widgets import pattern_pixmap, shape_pixmap
@@ -60,6 +59,7 @@ class ScheduleTable(QTableWidget):
         super().__init__(parent)
         self.grouped = grouped
         self._lines: dict[int, ScheduleLine] = {}
+        self._parts: dict[int, LinePart] = {}
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -70,7 +70,12 @@ class ScheduleTable(QTableWidget):
         self.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
 
     def line_for_row(self, row: int) -> ScheduleLine | None:
+        """Marca de la fila; en la fila de una sub-marca (``A1.1``), la marca que la reúne (``A1``)."""
         return self._lines.get(row)
+
+    def part_for_row(self, row: int) -> LinePart | None:
+        """Sub-marca de la fila, o ``None`` si es la fila de una marca."""
+        return self._parts.get(row)
 
     def row_of(self, mark: str) -> int | None:
         return next((row for row, line in self._lines.items() if line.mark == mark), None)
@@ -81,11 +86,12 @@ class ScheduleTable(QTableWidget):
         n_cols = len(headers)
         self.clear()
         self._lines = {}
+        self._parts = {}
         self.setColumnCount(n_cols)
         self.setHorizontalHeaderLabels([self._HEADER_BREAKS.get(h, h) for h in headers])
         self.clearSpans()
 
-        n_rows = sum(len(s.lines) + (2 if self.grouped else 1) for s in schedules) + (1 if self.grouped and schedules else 0)
+        n_rows = sum(len(s.lines) + sum(len(line.parts) for line in s.lines) + (2 if self.grouped else 1) for s in schedules) + (1 if self.grouped and schedules else 0)
         self.setRowCount(n_rows)
         row = 0
         for schedule in schedules:
@@ -100,6 +106,11 @@ class ScheduleTable(QTableWidget):
                 self._fill_line(row, line, col)
                 self._lines[row] = line
                 row += 1
+                for part in line.parts:  # sub-marcas: las barras en las que se divide la marca (A1.1, A1.2…)
+                    self._fill_part(row, line, part, col)
+                    self._lines[row] = line
+                    self._parts[row] = part
+                    row += 1
             self.setSpan(row, 0, 1, col["Total barras"] + 1)
             self.setItem(row, 0, _item(f"Subtotal {element.name}", _RIGHT, bold=True, bg=_color("subtotal")))
             self._fill_totals(row, col, schedule.total_length_m, schedule.total_weight_kg, _color("subtotal"), None)
@@ -135,10 +146,33 @@ class ScheduleTable(QTableWidget):
         self.setItem(row, col["Esquema"], picture)
         self.setItem(row, col["Cant. por elem."], _item(line.group.quantity, _CENTER))
         self.setItem(row, col["Total barras"], _item(f"{line.total_bars:,}", _CENTER))
+        if line.parts:  # los largos y pesos van en las sub-filas; aquí solo se anuncia de qué se compone
+            for name in ("Long. corte (mm)", "Peso unit. (kg)", "Long. total (m)", "Peso total (kg)"):
+                self.setItem(row, col[name], _item(""))
+            tip = mark.toolTip()
+            mark.setToolTip((tip + "\n" if tip else "") + f"Se arma con {line.parts_text}")
+            return
         self.setItem(row, col["Long. corte (mm)"], _item(f"{line.cut_length_mm:,.0f}", _RIGHT))
         self.setItem(row, col["Peso unit. (kg)"], _item(f"{line.unit_weight_kg:,.2f}", _RIGHT))
         self.setItem(row, col["Long. total (m)"], _item(f"{line.total_length_m:,.2f}", _RIGHT))
         self.setItem(row, col["Peso total (kg)"], _item(f"{line.total_weight_kg:,.2f}", _RIGHT, bold=True))
+
+    def _fill_part(self, row: int, line: ScheduleLine, part: LinePart, col: dict[str, int]) -> None:
+        """Fila de una sub-marca: una barra recta con la rosca de cada extremo y sus propios pesos."""
+        self.setRowHeight(row, IMG_H + 8)
+        bg = _color("subtotal")
+        self.setItem(row, col["Marca"], _item(part.mark, _CENTER, bold=True, bg=bg))
+        self.setItem(row, col["Barra"], _item(line.rebar.designation, _CENTER, bg=bg))
+        picture = _item("", _CENTER, bg=bg)
+        picture.setIcon(QIcon(shape_pixmap(part.shape, IMG_W, IMG_H, line.rebar)))
+        self.setItem(row, col["Esquema"], picture)
+        self.setItem(row, col["Cant. por elem."], _item(part.count * line.group.quantity, _CENTER, bg=bg))
+        self.setItem(row, col["Total barras"], _item(f"{part.total_bars:,}", _CENTER, bg=bg))
+        self.setItem(row, col["Long. corte (mm)"], _item(f"{part.length_mm:,.0f}", _RIGHT, bg=bg))
+        self.setItem(row, col["Peso unit. (kg)"], _item(f"{part.unit_weight_kg:,.2f}", _RIGHT, bg=bg))
+        self.setItem(row, col["Long. total (m)"], _item(f"{part.total_length_m:,.2f}", _RIGHT, bg=bg))
+        self.setItem(row, col["Peso total (kg)"], _item(f"{part.total_weight_kg:,.2f}", _RIGHT, bold=True, bg=bg))
+        self.item(row, col["Marca"]).setToolTip(f"Sub-marca de {line.mark}: {part.thread_text or 'sin rosca'}")
 
     def _fill_totals(self, row: int, col: dict[str, int], length: float, weight: float, bg: QColor,
                      fg: QColor | None) -> None:
@@ -260,12 +294,13 @@ class SummaryView(QScrollArea):
             section(f"{number}. Longitud comercial recomendada (barras · sobrante, con el plan optimizado de cada una)",
                     _data_table(["Barra", "Grado", *[f"{l / 1000:.2f} m" for l in lengths], "Recomendada"], rows, None))
             number += 1
-        couplers = result.coupler_counts()
-        if couplers:
-            section(f"{number}. Couplers por barra y tipo", _data_table(
-                ["Barra", "Grado", "Tipo de coupler", "Cantidad"],
-                [[c.rebar.designation, c.rebar.grade.name, coupler_label(c.kind), n(c.count, 0)] for c in couplers],
-                ["TOTAL", "", "", n(sum(c.count for c in couplers), 0)],
+        threads = result.thread_rows()
+        if threads:
+            section(f"{number}. Acopladores y roscas por barra", _data_table(
+                ["Barra", "Grado", "Roscas largas", "Roscas cortas", "Acopladores"],
+                [[t.rebar.designation, t.rebar.grade.name, n(t.long, 0), n(t.short, 0), n(t.couplers, 0)] for t in threads],
+                ["TOTAL", "", n(sum(t.long for t in threads), 0), n(sum(t.short for t in threads), 0),
+                 n(sum(t.couplers for t in threads), 0)],
             ))
         layout.addStretch(1)
         self.setWidget(body)

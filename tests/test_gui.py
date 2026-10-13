@@ -225,9 +225,12 @@ def test_bar_dialog_mark_and_stock_validation(qapp):
     dialog.mark.setText("  ")
     assert not ok_enabled(dialog)
     dialog.mark.setText("A2")
-    dialog.shape.setCurrentIndex(dialog.shape.findText("R · Recta"))
-    dialog._widgets["length"].setValue(13000)
+    dialog.shape.setCurrentIndex(dialog.shape.findText("L · Bastón L"))  # una barra doblada no se divide sola
+    dialog._widgets["a"].setValue(13000)
     assert not ok_enabled(dialog) and "excede la barra comercial" in dialog.info.text()
+    dialog.shape.setCurrentIndex(dialog.shape.findText("R · Recta"))  # una recta larga sí: se divide en sub-marcas
+    dialog._widgets["length"].setValue(13000)
+    assert ok_enabled(dialog) and "A2.1" in dialog.info.text() and "A2.2" in dialog.info.text()
 
 
 def test_bar_dialog_builds_fields_from_shape_and_keeps_values(qapp):
@@ -287,7 +290,7 @@ def test_bar_dialog_spiral_extra_turns_and_hooks(qapp):
     dialog = BarDialog(None)
     dialog.shape.setCurrentIndex(dialog.shape.findText("ES · Espiral"))
     assert list(dialog._widgets) == ["diameter", "pitch", "height", "turns_start", "turns_end", "hook_start", "ext_start",
-                                     "hook_end", "ext_end", "supply_mode", "joint", "lap_mm", "joint_coupler"]
+                                     "hook_end", "ext_end", "supply_mode", "joint", "lap_mm", "joint_threads"]
     dialog._widgets["turns_start"].setValue(2.0)
     dialog._widgets["turns_end"].setValue(0.5)
     _choose(dialog, "hook_end", 90)
@@ -299,13 +302,13 @@ def test_bar_dialog_spiral_extra_turns_and_hooks(qapp):
 def test_bar_dialog_couplers_on_free_ends_only(qapp):
     dialog = BarDialog(None)
     dialog.shape.setCurrentIndex(dialog.shape.findText("R · Recta"))
-    assert list(dialog._widgets) == ["length", "coupler_start", "coupler_end"]
-    assert [dialog._widgets["coupler_end"].itemText(i) for i in range(3)] == ["Sin coupler", "Rosca corta", "Rosca larga"]
+    assert list(dialog._widgets) == ["length", "coupler_start", "coupler_end", "joint", "lap_mm", "joint_threads"]
+    assert [dialog._widgets["coupler_end"].itemText(i) for i in range(3)] == ["Sin rosca", "Rosca corta", "Rosca larga"]
     _choose(dialog, "coupler_start", "short")
     _choose(dialog, "coupler_end", "long")
     shape = dialog.result_group().shape
     assert (shape.coupler_start, shape.coupler_end) == ("short", "long")
-    assert "Couplers: rosca corta + rosca larga" in dialog.info.text() and ok_enabled(dialog)
+    assert "Roscas para acoplador: rosca corta + rosca larga" in dialog.info.text() and ok_enabled(dialog)
     dialog.shape.setCurrentIndex(dialog.shape.findText("G · Barra con ganchos"))  # los ganchos por defecto (90°) chocan
     assert not ok_enabled(dialog) and "termina en gancho" in dialog.info.text()
     _choose(dialog, "hook_start", 0)
@@ -519,7 +522,7 @@ def test_other_element_type_and_project_remnant_setting(qapp, window):
 def test_open_catalog_example_from_the_menu(window):
     window.open_catalog()
     assert window.project.name == "Catálogo de formas" and not window.modified
-    assert window.bars_table.rowCount() == 26  # 25 marcas + subtotal
+    assert window.bars_table.rowCount() == 35  # 26 marcas + 8 sub-marcas (R4, ES3, ES4) + subtotal
     pictures = [r for r in range(window.bars_table.rowCount()) if window.bars_table.line_for_row(r)]
     assert all(not window.bars_table.item(r, 2).icon().isNull() for r in pictures)
     assert window.plan_table.rowCount() > 1 and window.act_catalog.text().startswith("Abrir ejemplo")
@@ -750,23 +753,43 @@ def _png_bytes() -> bytes:
 def test_bar_dialog_spiral_supply_options_follow_the_choices(qapp):
     dialog = BarDialog(None, stock_length_mm=12_000.0)
     dialog.shape.setCurrentIndex(dialog.shape.findText("ES · Espiral"))
-    enabled = lambda: [name for name in ("supply_mode", "joint", "lap_mm", "joint_coupler") if dialog._widgets[name].isEnabled()]  # noqa: E731
+    enabled = lambda: [name for name in ("supply_mode", "joint", "lap_mm", "joint_threads") if dialog._widgets[name].isEnabled()]  # noqa: E731
     assert enabled() == ["supply_mode"]  # carrete: no hay uniones
     assert "Suministro: carrete" in dialog.info.text() and "barras:" not in dialog.info.text()
     _choose(dialog, "supply_mode", "bars")
     assert enabled() == ["supply_mode", "joint", "lap_mm"]  # traslape por omisión
     _choose(dialog, "joint", "coupler")
-    assert enabled() == ["supply_mode", "joint", "joint_coupler"]
-    _choose(dialog, "joint_coupler", "long")
+    assert enabled() == ["supply_mode", "joint", "joint_threads"]
+    assert [dialog._widgets["joint_threads"].itemText(i) for i in range(3)] == ["Larga + corta", "Corta + corta", "Larga + larga"]
+    _choose(dialog, "joint_threads", "long_long")
     shape = dialog.result_group().shape
-    assert (shape.supply_mode, shape.joint, shape.joint_coupler) == ("bars", "coupler", "long")
-    assert "barras:" in dialog.info.text() and "Couplers: " in dialog.info.text() and "rosca larga" in dialog.info.text()
+    assert (shape.supply_mode, shape.joint, shape.joint_threads) == ("bars", "coupler", "long_long")
+    text = dialog.info.text()
+    assert "barras:" in text and "A1.1" in text and "A1.2" in text and "rosca larga al final" in text
+    assert "Roscas para acoplador: " in text and "rosca larga" in text
     _choose(dialog, "joint", "lap")
     dialog._widgets["lap_mm"].setValue(500.0)
     assert dialog.result_group().shape.lap_mm == 500.0 and "traslapes de 500 mm" in dialog.info.text()
-    assert "Couplers: " not in dialog.info.text() and ok_enabled(dialog)
+    assert "Roscas para acoplador: " not in dialog.info.text() and ok_enabled(dialog)
     _choose(dialog, "supply_mode", "coil")
     assert "Suministro: carrete" in dialog.info.text()
+
+
+def test_bar_dialog_straight_bar_joint_options_and_sub_marks(qapp):
+    dialog = BarDialog(None, suggested_mark="A1", stock_length_mm=12_000.0)
+    dialog.shape.setCurrentIndex(dialog.shape.findText("R · Recta"))
+    names = ("joint", "lap_mm", "joint_threads")
+    assert list(dialog._widgets) == ["length", "coupler_start", "coupler_end", *names]
+    enabled = lambda: [n for n in names if dialog._widgets[n].isEnabled()]  # noqa: E731
+    assert enabled() == ["joint", "lap_mm"]
+    dialog._widgets["length"].setValue(30_000)
+    _choose(dialog, "joint", "coupler")
+    assert enabled() == ["joint", "joint_threads"]
+    text = dialog.info.text()
+    assert "A1.1" in text and "A1.2" in text and "A1.3" in text and "rosca corta al inicio, rosca larga al final" in text
+    assert ok_enabled(dialog)
+    group = dialog.result_group()
+    assert group.shape.joint == "coupler" and group.shape.length == 30_000
 
 
 def test_bar_dialog_spiral_from_bars_changes_the_steel_with_laps(qapp):
@@ -776,3 +799,96 @@ def test_bar_dialog_spiral_from_bars_changes_the_steel_with_laps(qapp):
     _choose(dialog, "supply_mode", "bars")
     bars_weight = dialog.info.text().split("peso unitario <b>")[1].split(" kg")[0]
     assert float(bars_weight.replace(",", "")) > float(coil_weight.replace(",", ""))  # los traslapes consumen acero
+
+
+def test_theme_button_keeps_room_for_its_longest_text_even_with_a_big_font(window, qapp):
+    """En Windows el texto salía recortado («Modo …turno»): el botón reserva el ancho del texto más largo."""
+    from PySide6.QtGui import QFont
+
+    button = window.theme_button
+    original = qapp.font()
+    try:
+        for point_size in (original.pointSize(), 14, 18):
+            font = QFont(original)
+            font.setPointSize(point_size)
+            qapp.setFont(font)
+            widths = []
+            for dark in (False, True):
+                window.set_dark_mode(dark, remember=False)
+                metrics = button.fontMetrics()
+                longest = max(metrics.horizontalAdvance(t) for t in ("Modo nocturno", "Modo diurno"))
+                hint = button.sizeHint()
+                assert hint.width() >= longest + button.iconSize().width() + 20, (point_size, dark)
+                assert button.minimumSizeHint() == hint
+                widths.append(hint.width())
+            assert abs(widths[0] - widths[1]) <= 2  # el ancho no cambia al cambiar el texto
+    finally:
+        qapp.setFont(original)
+        window.set_dark_mode(False, remember=False)
+
+
+# ------------------------------------------------------------------ sub-marcas en las tablas y el detalle
+def _window_with_split_bars(window):
+    from core.shape_codes import StraightBar
+    from core.shape_templates import Spiral
+
+    element = StructuralElement("C-1", ElementType.COLUMN, "Nivel 3", 2)
+    element.add_group("A1", get_rebar("#5"), StraightBar(30_000, joint="coupler"), 3)
+    element.add_group("F1", get_rebar("#4"), Spiral(1100, 100, 5600, supply_mode="bars", joint="coupler"), 1)
+    element.add_group("B1", get_rebar("#4"), StraightBar(2_000), 2)
+    window.project.elements.append(element)
+    window.refresh(select=element)
+    return element
+
+
+def test_the_bars_table_lists_the_sub_marks_under_their_mark_with_their_own_numbers(window):
+    element = _window_with_split_bars(window)
+    table = window.bars_table
+    marks = [table.item(r, 0).text() if table.item(r, 0) else "" for r in range(table.rowCount())]
+    assert marks[:8] == ["A1", "A1.1", "A1.2", "A1.3", "F1", "F1.1", "F1.2", "F1.3"] and marks[8] == "B1"
+    headers = [table.horizontalHeaderItem(c).text().replace("\n", " ") for c in range(table.columnCount())]
+    peso = headers.index("Peso total (kg)")
+    assert table.item(0, peso).text() == "" and table.item(1, peso).text() != ""  # la marca deja los pesos a sus sub-marcas
+    schedule = next(s for s in window.result.element_schedules if s.element is element)
+    shown = sum(float(table.item(r, peso).text().replace(",", "")) for r in range(table.rowCount())
+                if table.item(r, 0) and table.item(r, peso) and table.item(r, peso).text() and "Subtotal" not in table.item(r, 0).text())
+    assert shown == pytest.approx(schedule.total_weight_kg, abs=0.05)
+    assert table.part_for_row(0) is None and table.part_for_row(1).mark == "A1.1"
+    assert table.line_for_row(2) is table.line_for_row(0)  # la sub-fila pertenece a la marca A1
+    assert table.row_of("A1") == 0 and table.row_of("F1") == 4
+
+
+def test_selecting_a_sub_mark_shows_that_bar_in_the_detail_and_edit_acts_on_the_whole_mark(window, monkeypatch):
+    _window_with_split_bars(window)
+    window.bars_table.selectRow(2)  # A1.2: la barra intermedia
+    assert window.current_part().mark == "A1.2" and window.current_line().mark == "A1"
+    title, details = window.detail.title.text(), window.detail.details.text()
+    assert "A1.2" in title and "Sub-marca de" in details and "rosca corta al inicio, rosca larga al final" in details
+    assert "A1.1 ×1" in details and "se arma con" in details
+    window.bars_table.selectRow(0)
+    assert window.current_part() is None and "Sub-marcas" in window.detail.details.text()
+    opened = []
+
+    def fake_exec(self):
+        opened.append(self.mark.text())
+        return False
+
+    monkeypatch.setattr(BarDialog, "exec", fake_exec)
+    window.bars_table.selectRow(3)  # A1.3
+    window.edit_bar()
+    assert opened == ["A1"] and window.act_edit_bar.isEnabled()  # se edita la marca completa
+
+
+def test_the_project_table_and_the_summary_show_sub_marks_acopladores_and_roscas(window):
+    _window_with_split_bars(window)
+    window.tabs.setCurrentIndex(1)
+    table = window.project_table
+    rows = [table.item(r, 0).text() for r in range(table.rowCount()) if table.item(r, 0)]
+    assert {"A1.1", "A1.2", "A1.3", "F1.1", "F1.2", "F1.3"} <= set(rows)
+    row = next(r for r in range(table.rowCount()) if table.item(r, 0) and table.item(r, 0).text() == "F1.2")
+    table.selectRow(row)
+    assert "F1.2" in window.detail.title.text()
+    from PySide6.QtWidgets import QLabel
+
+    titles = [label.text() for label in window.summary.findChildren(QLabel)]
+    assert any("Acopladores y roscas por barra" in t for t in titles)

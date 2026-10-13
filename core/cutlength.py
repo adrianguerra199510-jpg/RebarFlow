@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from core.coupler import coupler_text
 
@@ -25,31 +25,92 @@ class HookInfo:
 
 
 @dataclass(frozen=True)
+class BarPart:
+    """Una o varias barras idénticas de una pieza armada con varias barras: la **sub-marca** (``A1.1``, ``A1.2``…).
+
+    Attributes:
+        length_mm: Largo de cada barra.
+        count: Cuántas barras idénticas lleva cada unidad de la pieza (las barras intermedias de una unión por acoplador
+            son todas iguales: se agrupan en una sola sub-marca).
+        start_thread: Rosca del extremo inicial (``"short"``, ``"long"`` o ``""`` si no la lleva).
+        end_thread: Rosca del extremo final.
+    """
+
+    length_mm: float
+    count: int = 1
+    start_thread: str = ""
+    end_thread: str = ""
+
+    @property
+    def threads(self) -> tuple[str, ...]:
+        """Roscas de cada barra de esta sub-marca (inicio y final, las que lleve)."""
+        return tuple(t for t in (self.start_thread, self.end_thread) if t)
+
+    @property
+    def thread_text(self) -> str:
+        """Roscas en texto: ``"rosca corta al inicio, rosca larga al final"`` (vacío si no lleva)."""
+        names = {"short": "rosca corta", "long": "rosca larga"}
+        parts = [f"{names[t]} al {where}" for t, where in ((self.start_thread, "inicio"), (self.end_thread, "final"))
+                 if t in names]
+        return ", ".join(parts)
+
+
+@dataclass(frozen=True)
 class Supply:
     """Cómo se suministra una unidad de una forma: las barras que hay que cortar y el material que consume.
 
-    Casi siempre es una sola barra del largo de corte. Una espiral puede llegar en rollo (``coil``) o armarse con barras
-    individuales: si su desarrollo supera la barra comercial se hace con varias piezas unidas con traslapes (el material
-    crece con ellos) o con couplers (``couplers`` lista los de las uniones).
+    Casi siempre es una sola barra del largo de corte. Una espiral puede llegar en rollo (``coil``) y una pieza más
+    larga que la barra comercial se arma con varias barras unidas con traslapes (el material crece con ellos) o con
+    acopladores (``parts`` agrupa las barras iguales en sub-marcas, cada una con las roscas de sus extremos).
 
     Attributes:
         pieces_mm: Largo de cada barra que se corta para una unidad, sin redondear (un solo elemento si no hay uniones).
         coil: Verdadero si la pieza sale de rollo y no de barras comerciales (no genera retales).
-        couplers: Tipo de coupler de cada unión entre barras, por unidad.
+        parts: Barras agrupadas en sub-marcas, en el orden de la pieza; vacío si la pieza no se divide.
+        joint: ``"lap"`` o ``"coupler"`` si la pieza se divide; vacío si no.
         notes: Información para el doblador (cuántas barras, qué uniones).
         warnings: Incumplimientos no fatales de la norma.
     """
 
     pieces_mm: tuple[float, ...]
     coil: bool = False
-    couplers: tuple[str, ...] = ()
+    parts: tuple[BarPart, ...] = ()
+    joint: str = ""
     notes: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
+
+    @classmethod
+    def from_parts(cls, parts: tuple[BarPart, ...], joint: str = "", notes: tuple[str, ...] = (),
+                   warnings: tuple[str, ...] = ()) -> Supply:
+        """Pieza armada con ``parts``; ``pieces_mm`` sale de ellas (cada barra tantas veces como ``count``)."""
+        return cls(tuple(p.length_mm for p in parts for _ in range(p.count)), parts=parts, joint=joint, notes=notes,
+                   warnings=warnings)
+
+    def with_part_lengths(self, lengths: tuple[float, ...]) -> Supply:
+        """Copia con el largo de cada sub-marca reemplazado (p. ej. por el redondeado) y ``pieces_mm`` al día."""
+        parts = tuple(replace(part, length_mm=length) for part, length in zip(self.parts, lengths, strict=True))
+        return replace(self, parts=parts, pieces_mm=tuple(p.length_mm for p in parts for _ in range(p.count)))
 
     @property
     def material_mm(self) -> float:
         """Material total por unidad: la suma de las barras (incluye los traslapes)."""
         return sum(self.pieces_mm)
+
+    @property
+    def joints(self) -> int:
+        """Uniones entre barras de cada unidad (traslapes o acopladores)."""
+        return 0 if self.coil else len(self.pieces_mm) - 1
+
+    @property
+    def threads(self) -> tuple[str, ...]:
+        """Roscas de todas las barras de la pieza (``"short"`` / ``"long"``), por unidad."""
+        return tuple(t for part in self.parts for _ in range(part.count) for t in part.threads)
+
+    def sub_marks(self, mark: str) -> tuple[tuple[str, BarPart], ...]:
+        """Sub-marcas de ``mark``: ``("A1.1", parte), ("A1.2", parte)…``; vacío si la pieza no se divide."""
+        if self.joints < 1:
+            return ()
+        return tuple((f"{mark}.{k}", part) for k, part in enumerate(self.parts, start=1))
 
 
 @dataclass(frozen=True)

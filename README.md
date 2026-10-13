@@ -77,7 +77,7 @@ galería con miniatura, y el formulario se genera solo a partir de los parámetr
 | `O` | **Omega (Ω)** | ala, pata, tramo superior, pata y ala |
 | `ET` / `ETR` | **Estribo triangular / trapezoidal** | ángulos internos distintos de 90°; cada pata a 90° o 135° |
 | `AR` | **Aro circular** | traslape y/o ganchos de 90° o 135° en cada extremo; sin ganchos coincide con el código 75 de BS 8666 |
-| `ES` | **Espiral** | vueltas adicionales al inicio y al final por separado, ganchos de 90° o 135° en cada extremo; se suministra en **carrete o con barras individuales** (traslape o coupler) |
+| `ES` | **Espiral** | vueltas adicionales al inicio y al final por separado, ganchos de 90° o 135° en cada extremo; se suministra en **carrete o con barras individuales** (traslape o acoplador) |
 | `X` | **Personalizada** | tramos y ángulos definidos a mano |
 
 > Se buscó el catálogo numerado de formas de Revit pero no se pudo consultar (la búsqueda solo devolvió la
@@ -107,27 +107,37 @@ separado (ACI 318 pide 1.5 en cada extremo) y los mismos ganchos. Un archivo gua
 |---|---|---|
 | ![Estribo](docs/ui_dialogo_estribo.png) | ![Aro](docs/ui_dialogo_aro.png) | ![Espiral](docs/ui_dialogo_espiral.png) |
 
-### Espiral: carrete o barras individuales
+### Barras más largas que la barra comercial: sub-marcas (traslape o acoplador)
 
-El parámetro **Se suministra en** decide cómo llega la espiral:
+Una **espiral** puede llegar en **carrete** (rollo continuo, por omisión: sin uniones, sin retales) o armarse con **barras
+individuales** (parámetro *Se suministra en*). Una **barra recta** y una espiral de barras que midan más que la barra comercial del
+proyecto se dividen en barras unidas con una **unión** a elegir; las formas dobladas (L, U, estribos…) siguen avisando que no caben.
 
-* **Carrete (rollo continuo)**, por omisión: un solo alambre, sin uniones. No sale de barras comerciales ni genera retales.
-* **Barras individuales**: la espiral se arma con barras rectas de la longitud comercial del proyecto. Si su desarrollo cabe en una
-  barra es una sola pieza; si es más larga (una espiral de columna suele medir decenas de metros) se elige la **unión**:
-  * **Traslape**: cada unión monta una barra sobre la otra. La longitud del traslape es la de la norma (`48·d`, mínimo 300 mm)
-    o la que se escriba; con `n` barras el acero por espiral crece `(n − 1)` traslapes y ese acero entra en la longitud de corte,
-    el peso y el plan de corte. Un traslape menor que el de la norma se señala con un aviso.
-  * **Coupler** (rosca corta o larga): las barras se unen a tope, el largo no cambia y se cuenta un coupler por unión en el
-    resumen de couplers.
+* **Traslape**: cada unión monta una barra sobre la otra. La longitud es la de la norma (`48·d`, mínimo 300 mm) o la que se escriba;
+  con `n` barras el acero crece `(n − 1)` traslapes y ese acero entra en la longitud de corte, el peso y el plan de corte. Un traslape
+  menor que el de la norma se señala con un aviso. Las barras no llevan roscas.
+* **Acoplador**: las barras se unen a tope y el largo no cambia. El acoplador es **una sola pieza**; lo que cambia es la **rosca de cada
+  extremo de barra**. Se elige en *Roscas de la unión*: **larga + corta** (lo normal: la barra que termina lleva la rosca larga y la que
+  sigue la corta), **corta + corta** o **larga + larga**.
 
 Se cortan tantas barras de longitud comercial completa como quepan y la última lleva el resto (`n = ⌈(L − ℓ)/(S − ℓ)⌉` barras con
-traslape `ℓ` y barra `S`; `⌈L/S⌉` con coupler). El diálogo muestra «4 barras: 3 × 12.00 m + 1.67 m», el panel de detalle las
-lista y las planillas de Excel y PDF añaden la sección *Suministro con uniones*. Las barras entran al plan de corte como
-cualquier otra pieza. Los archivos anteriores se abren como espiral de carrete.
+traslape `ℓ` y barra `S`; `⌈L/S⌉` con acoplador). La marca se divide en **sub-marcas**: si la marca es `A1`, las barras salen como
+`A1.1`, `A1.2`… y **las barras idénticas se agrupan** en una sola con su cantidad. Con acoplador de roscas larga + corta, una barra de
+30 m queda `A1.1` (12 m, rosca larga al final), `A1.2` (12 m, rosca corta al inicio y larga al final) y `A1.3` (6 m, rosca corta al
+inicio); con dos barras, solo `A1.1` y `A1.2`. Con traslape, `A1.1` (las barras completas ×n) y `A1.2` (el resto).
 
-| Espiral con traslapes | Espiral con couplers |
+En la planilla (interfaz, Excel y PDF) la fila de la marca `A1` conserva su dibujo y sus cotas, y **debajo** van las sub-filas con la barra
+recta, su longitud, la rosca de cada extremo (`RC` / `RL`) y sus propias cantidades y pesos: **los totales salen de las sub-marcas** y no se
+cuentan dos veces. Las sub-marcas entran al plan de corte como `Elemento/A1.2`. En el diálogo y el panel de detalle se ven las sub-marcas
+y, al elegir una sub-fila, el panel muestra esa barra; *Editar* y *Eliminar* sobre una sub-fila actúan sobre la marca completa. Una
+sub-marca no puede llamarse como otra marca del mismo elemento (el cálculo avisa). Los archivos anteriores se abren sin cambios (la
+espiral como carrete; un parámetro antiguo de «tipo de coupler» pasa a roscas corta + corta o larga + larga).
+
+| Espiral con traslapes | Espiral con acopladores |
 |---|---|
-| ![Traslape](docs/ui_dialogo_espiral_traslape.png) | ![Coupler](docs/ui_dialogo_espiral_coupler.png) |
+| ![Traslape](docs/ui_dialogo_espiral_traslape.png) | ![Acoplador](docs/ui_dialogo_espiral_coupler.png) |
+
+![Sub-marcas en la planilla](docs/ui_subbarras.png)
 
 > El traslape de `48·d` y 300 mm para refuerzo en espiral (ACI 318-19, 25.7.3.5, barra corrugada sin recubrir) está citado **de
 > memoria** y no se ha contrastado con el texto de la norma: confírmelo con la de su proyecto y use *Longitud del traslape* para
@@ -161,18 +171,22 @@ Las tablas de la planilla no llevan columna de ganchos: el dibujo ya los rotula.
 la marca sale en **rojo** (con el aviso en su ayuda emergente) y Excel y PDF listan el texto en un bloque *Avisos* bajo la
 planilla. Con una extensión vacía se usa la estándar.
 
-### Couplers (rosca corta y rosca larga)
+### Roscas para acoplador (rosca corta y rosca larga)
 
-Las barras que no terminan en gancho admiten un **coupler** en cada extremo libre (recta, bastón L por el extremo de A, barra con
-ganchos con el extremo en «Sin gancho», Z, quiebre, omega y forma personalizada). Se dibuja un **rectángulo** sobre el extremo
-con su rótulo (`RC` = rosca corta, el rectángulo más corto; `RL` = rosca larga, el más largo) y se elige el tipo en *Coupler
-inicial* / *Coupler final*. Un extremo con gancho (incluida la pata de una L o de una U) no admite coupler: el diálogo lo avisa.
+El **acoplador es una sola pieza**; lo que cambia es la **rosca que se labra en cada extremo de barra**. Las barras que no terminan en
+gancho admiten una rosca en cada extremo libre (recta, bastón L por el extremo de A, barra con ganchos con el extremo en «Sin gancho», Z,
+quiebre, omega y forma personalizada). Se dibuja un **rectángulo** sobre el extremo con su rótulo (`RC` = rosca corta, el rectángulo más
+corto; `RL` = rosca larga, el más largo) y se elige en *Rosca inicial* / *Rosca final*. Un extremo con gancho (incluida la pata de una L
+o de una U) no admite rosca: el diálogo lo avisa. Una barra lleva normalmente rosca larga en un lado y corta en el otro, pero también
+puede llevar corta en los dos o larga en los dos.
 
-El coupler es un accesorio: **no cambia la longitud de corte** (las cotas llegan al extremo de la barra y la rosca se labra
-sobre esa longitud). Se cuenta por barra y tipo en la hoja *Resumen* (Excel, PDF e interfaz), y el encabezado de la planilla
-explica `RC`/`RL`. Si su proveedor pide un sobrante por rosca o por forja del extremo, súmelo a la cota del tramo.
+El acoplador es un accesorio: **no cambia la longitud de corte** (las cotas llegan al extremo de la barra y la rosca se labra sobre esa
+longitud). La hoja *Resumen* (Excel, PDF e interfaz) lleva la tabla **Acopladores y roscas por barra**: roscas largas, roscas cortas y
+acopladores, estos últimos como la mitad de los extremos roscados (cada acoplador junta dos, redondeado hacia arriba; cuenta también los
+de las uniones de las marcas divididas). El encabezado de la planilla explica `RC` / `RL`. Si su proveedor pide un sobrante por rosca o
+por forja del extremo, súmelo a la cota del tramo.
 
-![Coupler](docs/ui_dialogo_coupler.png)
+![Rosca](docs/ui_dialogo_coupler.png)
 
 ### Forma dibujada a mano
 
@@ -263,7 +277,7 @@ Siguen el tema claro o nocturno y tienen variante deshabilitada; se usan tambié
 Cada fila lleva el dibujo de su forma con las cotas, igual que las tablas de armaduras de Revit o de los programas de
 despiece. El mismo renderizador (`exporters/shape_images.py`) alimenta Excel, PDF y la interfaz. Las columnas de la planilla son
 *Marca, Barra, Esquema, longitud de corte, cantidad por elemento, total de barras, peso unitario, longitud total y peso total*:
-las **cotas, los ganchos y los couplers van solo en el dibujo** (que sale grande para que se lean bien), y el diámetro, el
+las **cotas, los ganchos y las roscas van solo en el dibujo** (que sale grande para que se lean bien), y el diámetro, el
 nombre de la forma y las observaciones no van en la tabla (están en el diálogo y el panel de detalle).
 
 | Excel (`.xlsx`) | PDF |
@@ -284,9 +298,9 @@ nombre de la forma y las observaciones no van en la tabla (están en el diálogo
 core/
   geometry.py       GeometryError y fórmulas de doblez (tangente, arco, deducción)
   rebar.py          Rebar, SteelGrade, ganchos estándar, radios de doblez y catálogo #3–#11 y #14
-  cutlength.py      CutLength (desglose del cálculo), HookInfo (largo de cada gancho), couplers de la barra y Supply (barras que arman una pieza)
-  splice.py         uniones entre barras comerciales: traslape de norma, reparto en barras con traslape o coupler
-  coupler.py        tipos de coupler (rosca corta / larga), rótulos y leyendas
+  cutlength.py      CutLength (desglose del cálculo), HookInfo (largo de cada gancho), roscas de la barra, Supply y BarPart (barras y sub-marcas de una pieza)
+  splice.py         uniones entre barras comerciales: traslape de norma, reparto en sub-marcas con traslape o acoplador (roscas de la unión)
+  coupler.py        roscas para acoplador (corta / larga), rótulos, leyendas y conteo de acopladores
   params.py         parámetros de una forma (tipo, límites, opciones): validación y formularios
   polybar.py        motor: polilínea abierta con ganchos y polígono cerrado con ganchos (longitud y esquema)
   sketch.py         esquemas independientes del medio de dibujo (trazos, rótulos con su letra, líneas de cota)
@@ -374,5 +388,6 @@ Para un estribo poligonal cerrado se hereda de `ClosedPolyShape`; para geometrí
 * Los esquemas son proporcionales a las cotas con un tramo mínimo, para que un gancho corto siga legible.
 * El plan de corte usa barras comerciales de una sola longitud por diámetro; la comparación de 6, 9 y 12 m ayuda a elegirla, pero
   no mezcla longitudes en una misma compra.
-* Las piezas se cortan de barras rectas; las espirales llegan en carrete o, a elección, se arman con barras individuales unidas con traslape o coupler. Una barra recta o un estribo más largo que la barra comercial no se divide solo: hay que partirlo en marcas traslapadas a mano.
+* Las piezas se cortan de barras rectas; las espirales llegan en carrete o, a elección, se arman con barras individuales. Las espirales de barras y las barras rectas más largas que la barra comercial se dividen solas en sub-marcas unidas con traslape o acoplador; una forma doblada (L, U, estribo…) más larga que la barra comercial no se divide: hay que partirla en marcas traslapadas a mano.
+* Los acopladores se cuentan como la mitad de los extremos roscados; si una rosca se une a una barra que no está en la planilla, el conteo es una estimación.
 * La cinta de proyectos no restaura los proyectos abiertos la próxima vez que se inicia la aplicación: cada sesión empieza con un proyecto vacío.

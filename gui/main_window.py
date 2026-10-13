@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 from core.element import ElementType, StructuralElement
 from core.project import DEFAULT_PROJECT_NAME, Project
 from core.serialization import FILE_SUFFIX, load_project, project_from_dict, project_to_dict, save_project
-from engine.bbs_calculator import BBSCalculator, BBSResult, ScheduleLine
+from engine.bbs_calculator import BBSCalculator, BBSResult, LinePart, ScheduleLine
 from exporters.excel_exporter import ExcelExporter
 from exporters.pdf_exporter import PdfExporter
 from gui import style
@@ -26,7 +26,7 @@ from gui.icon import theme_icon
 from gui.project_bar import ProjectBar
 from gui.session import ProjectSession
 from gui.tables import CuttingPlanTable, ScheduleTable, SummaryView
-from gui.widgets import BarDetailPanel
+from gui.widgets import BarDetailPanel, ThemeButton
 from sample_project import build_bridge_project, build_catalog_project, build_project
 
 _PROJECT_FILTER = f"Proyecto RebarFlow (*{FILE_SUFFIX})"
@@ -282,10 +282,11 @@ class MainWindow(QMainWindow):
         menu.addMenu("A&yuda").addAction(self.act_about)
 
         # Botón del tema en la esquina superior derecha, a la altura de la barra de menús.
-        self.theme_button = QToolButton()
+        self.theme_button = ThemeButton(("Modo nocturno", "Modo diurno"))
         self.theme_button.setObjectName("themeButton")
         self.theme_button.setDefaultAction(self.act_theme)
         self.theme_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.theme_button.setIconSize(QSize(18, 18))
         self.theme_button.setCursor(Qt.CursorShape.PointingHandCursor)
         menu.setCornerWidget(self.theme_button, Qt.Corner.TopRightCorner)
         self._update_theme_action()
@@ -324,8 +325,14 @@ class MainWindow(QMainWindow):
         self.set_dark_mode(not style.current().dark)
 
     def current_line(self) -> ScheduleLine | None:
+        """Marca seleccionada en la tabla de barras (la que reúne las sub-marcas si se eligió una sub-fila)."""
         rows = self.bars_table.selectionModel().selectedRows()
         return self.bars_table.line_for_row(rows[0].row()) if rows else None
+
+    def current_part(self) -> LinePart | None:
+        """Sub-marca seleccionada (``A1.1``), o ``None`` si se eligió una marca."""
+        rows = self.bars_table.selectionModel().selectedRows()
+        return self.bars_table.part_for_row(rows[0].row()) if rows else None
 
     def refresh(self, select: StructuralElement | None = None, select_mark: str | None = None) -> None:
         """Recalcula la planilla y reconstruye el árbol y las tablas conservando la selección."""
@@ -453,12 +460,13 @@ class MainWindow(QMainWindow):
         for widget in (self.act_edit_bar, self.act_delete_bar, self.btn_edit_bar, self.btn_delete_bar):
             widget.setEnabled(line is not None)
         if line is not None or self.tabs.currentIndex() == 0:
-            self.detail.show_line(line)
+            self.detail.show_line(line, self.current_part())
 
     def _on_project_row_selection(self) -> None:
         rows = self.project_table.selectionModel().selectedRows()
         if rows:
-            self.detail.show_line(self.project_table.line_for_row(rows[0].row()))
+            row = rows[0].row()
+            self.detail.show_line(self.project_table.line_for_row(row), self.project_table.part_for_row(row))
 
     # ------------------------------------------------------------------ elementos
     def _check_unique(self, name: str, level: str, substructure: str = "", ignore: StructuralElement | None = None) -> None:

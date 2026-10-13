@@ -544,15 +544,17 @@ def test_couplers_are_listed_in_the_summaries_and_the_header_legend(tmp_path):
     wb = load_workbook(ExcelExporter().export(result, tmp_path / "c.xlsx"))
     summary = wb["Resumen"]
     texts = [str(summary.cell(r, 1).value) for r in range(1, summary.max_row + 1)]
-    title = next(i for i, t in enumerate(texts, start=1) if "Couplers por barra y tipo" in t)
-    assert summary.cell(title + 2, 3).value == "Rosca corta (RC)" and summary.cell(title + 2, 4).value == 8
-    assert summary.cell(title + 3, 3).value == "Rosca larga (RL)" and summary.cell(title + 3, 4).value == 2
-    assert summary.cell(title + 4, 4).value == 10  # total
-    assert "RC = coupler de rosca corta, RL = coupler de rosca larga" in wb["Planilla BBS"]["B4"].value
+    title = next(i for i, t in enumerate(texts, start=1) if "Acopladores y roscas por barra" in t)
+    header = [summary.cell(title + 1, c).value for c in range(1, 6)]
+    assert header == ["Barra", "Grado", "Roscas largas", "Roscas cortas", "Acopladores"]
+    row = [summary.cell(title + 2, c).value for c in range(1, 6)]
+    assert row[0] == "#5" and row[2:] == [2, 8, 5]  # 2 largas + 8 cortas = 10 extremos = 5 acopladores (uno junta dos)
+    assert [summary.cell(title + 3, c).value for c in range(3, 6)] == [2, 8, 5]  # total
+    assert "RC = rosca corta, RL = rosca larga" in wb["Planilla BBS"]["B4"].value
     plain = StructuralElement("C-2", ElementType.COLUMN, "Nivel 1", 1)
     plain.add_group("A", N5, StraightBar(3000), 4)
     wb = load_workbook(ExcelExporter().export(BBSCalculator().calculate([plain]), tmp_path / "p.xlsx"))
-    assert not any("Couplers" in str(c.value) for row in wb["Resumen"].iter_rows() for c in row)
+    assert not any("Acopladores" in str(c.value) for row in wb["Resumen"].iter_rows() for c in row)
     assert "RC =" not in wb["Planilla BBS"]["B4"].value
 
 

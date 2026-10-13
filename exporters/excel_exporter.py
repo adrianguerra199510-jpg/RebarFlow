@@ -27,8 +27,10 @@ from openpyxl.utils.units import pixels_to_EMU
 from openpyxl.worksheet.properties import PageSetupProperties
 from openpyxl.worksheet.worksheet import Worksheet
 
-from core.coupler import coupler_label, coupler_legend
-from engine.bbs_calculator import BBSResult, ScheduleLine
+from core.coupler import coupler_legend
+from core.rebar import Rebar
+from core.shape_codes import ShapeCode
+from engine.bbs_calculator import BBSResult, LinePart, ScheduleLine
 from engine.cutting_report import plan_rows, plan_title, stock_comparison
 from exporters.cutting_images import render_pattern_png
 from exporters.logo import fitted_size
@@ -50,6 +52,7 @@ _WARNING = Font(name=_FONT, size=10, color="C00000")
 _HEADER_FILL = PatternFill("solid", fgColor=_NAVY)
 _BAND_FILL = PatternFill("solid", fgColor=_BAND)
 _SUBTOTAL_FILL = PatternFill("solid", fgColor=_SUBTOTAL)
+_PART_FILL = PatternFill("solid", fgColor="F6F8FC")  # sub-marcas (A1.1, A1.2…)
 
 _THIN = Side(style="thin", color=_GRID)
 _BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
@@ -132,8 +135,13 @@ class ExcelExporter:
             for line in schedule.lines:
                 self._write_line(ws, row, line, col)
                 if images:
-                    self._add_shape_image(ws, row, col["Esquema"], line)
+                    self._add_shape_image(ws, row, col["Esquema"], line.shape, line.rebar)
                 row += 1
+                for part in line.parts:  # sub-marcas: las barras en las que se divide la marca (A1.1, A1.2…)
+                    self._write_part(ws, row, line, part, col, n_cols)
+                    if images:
+                        self._add_shape_image(ws, row, col["Esquema"], part.shape, line.rebar)
+                    row += 1
             if schedule.lines:
                 ws.row_dimensions.group(first_line, row - 1, outline_level=1, hidden=False)
 
@@ -147,8 +155,7 @@ class ExcelExporter:
             _style(ws.cell(row, 1, "TOTAL GENERAL"), _HEADER_FONT, _RIGHT, fill=_HEADER_FILL)
             self._write_totals(ws, row, col, n_cols, result.total_length_m, result.total_weight_kg, header=True)
             row += 1
-        row = self._write_warnings(ws, row, n_cols, result)
-        self._write_supply_notes(ws, row, n_cols, result)
+        self._write_warnings(ws, row, n_cols, result)
 
         widths = {"Marca": 9, "Barra": 9, "Esquema": 41, "Long. corte (mm)": 13, "Cant. por elem.": 11,
                   "Total barras": 11, "Peso unit. (kg)": 12, "Long. total (m)": 13, "Peso total (kg)": 13}
@@ -162,16 +169,37 @@ class ExcelExporter:
         values: list[tuple[str, object, str | None, Alignment]] = [
             ("Marca", line.mark, None, _CENTER),
             ("Barra", line.rebar.designation, None, _CENTER),
-            ("Long. corte (mm)", line.cut_length_mm, _FMT_MM, _RIGHT),
             ("Cant. por elem.", line.group.quantity, _FMT_MM, _CENTER),
             ("Total barras", line.total_bars, _FMT_MM, _CENTER),
-            ("Peso unit. (kg)", line.unit_weight_kg, _FMT_2, _RIGHT),
-            ("Long. total (m)", line.total_length_m, _FMT_2, _RIGHT),
-            ("Peso total (kg)", line.total_weight_kg, _FMT_2, _RIGHT),
         ]
+        if not line.parts:  # una marca dividida en sub-marcas deja los largos y pesos a sus sub-filas
+            values += [
+                ("Long. corte (mm)", line.cut_length_mm, _FMT_MM, _RIGHT),
+                ("Peso unit. (kg)", line.unit_weight_kg, _FMT_2, _RIGHT),
+                ("Long. total (m)", line.total_length_m, _FMT_2, _RIGHT),
+                ("Peso total (kg)", line.total_weight_kg, _FMT_2, _RIGHT),
+            ]
         for name, value, fmt, alignment in values:
             font = _WARNING if name == "Marca" and line.warnings else _BODY  # la marca con aviso va en rojo
             _style(ws.cell(row, col[name], value), font, alignment, number_format=fmt)
+
+    def _write_part(self, ws: Worksheet, row: int, line: ScheduleLine, part: LinePart, col: dict[str, int],
+                    n_cols: int) -> None:
+        """Fila de una sub-marca (``A1.1``): una barra recta con la rosca de cada extremo y sus propios pesos."""
+        values: list[tuple[str, object, str | None, Alignment]] = [
+            ("Marca", part.mark, None, _CENTER),
+            ("Barra", line.rebar.designation, None, _CENTER),
+            ("Long. corte (mm)", part.length_mm, _FMT_MM, _RIGHT),
+            ("Cant. por elem.", part.count * line.group.quantity, _FMT_MM, _CENTER),
+            ("Total barras", part.total_bars, _FMT_MM, _CENTER),
+            ("Peso unit. (kg)", part.unit_weight_kg, _FMT_2, _RIGHT),
+            ("Long. total (m)", part.total_length_m, _FMT_2, _RIGHT),
+            ("Peso total (kg)", part.total_weight_kg, _FMT_2, _RIGHT),
+        ]
+        for c in range(1, n_cols + 1):
+            ws.cell(row, c).fill = _PART_FILL
+        for name, value, fmt, alignment in values:
+            _style(ws.cell(row, col[name], value), _BODY, alignment, fill=_PART_FILL, number_format=fmt)
 
     @staticmethod
     def _write_warnings(ws: Worksheet, row: int, n_cols: int, result: BBSResult) -> int:
@@ -189,26 +217,10 @@ class ExcelExporter:
         return row
 
     @staticmethod
-    def _write_supply_notes(ws: Worksheet, row: int, n_cols: int, result: BBSResult) -> int:
-        """Marcas armadas con varias barras unidas (espirales de barras individuales): qué barras y qué uniones."""
-        notes = result.supply_notes
-        if not notes:
-            return row
-        row += 1
-        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=n_cols)
-        _style(ws.cell(row, 1, "Suministro con uniones"), Font(name=_FONT, size=11, bold=True, color=_NAVY),
-               Alignment(vertical="center"))
-        for element, mark, text in notes:
-            row += 1
-            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=n_cols)
-            _style(ws.cell(row, 1, f"{element} · marca {mark}: {text}"), _BODY, _LEFT)
-        return row
-
-    @staticmethod
-    def _add_shape_image(ws: Worksheet, row: int, column: int, line: ScheduleLine) -> None:
-        """Inserta el esquema de ``line`` centrado en la celda (fila alta, columna ``Esquema``)."""
+    def _add_shape_image(ws: Worksheet, row: int, column: int, shape: ShapeCode, rebar: Rebar) -> None:
+        """Inserta el esquema de ``shape`` centrado en la celda (fila alta, columna ``Esquema``)."""
         ws.row_dimensions[row].height = _IMG_ROW_HEIGHT_PT
-        image = XLImage(BytesIO(render_shape_png(line.shape, 2 * _IMG_W, 2 * _IMG_H, line.rebar)))
+        image = XLImage(BytesIO(render_shape_png(shape, 2 * _IMG_W, 2 * _IMG_H, rebar)))
         row_px = _IMG_ROW_HEIGHT_PT * 96 / 72
         image.anchor = OneCellAnchor(
             _from=AnchorMarker(col=column - 1, colOff=pixels_to_EMU(4), row=row - 1,
@@ -312,14 +324,16 @@ class ExcelExporter:
                               ["@"] * (len(lengths) + 3), total=None)
             n_cols = max(n_cols, len(lengths) + 3)
 
-        # Couplers (solo si alguna barra los lleva)
-        couplers = result.coupler_counts()
-        if couplers:
-            row = self._section(ws, row + 1, f"{number}. Couplers por barra y tipo")
+        # Acopladores y roscas (solo si alguna barra lleva rosca o se une con acoplador)
+        threads = result.thread_rows()
+        if threads:
+            row = self._section(ws, row + 1, f"{number}. Acopladores y roscas por barra")
             self._table(
-                ws, row, ["Barra", "Grado", "Tipo de coupler", "Cantidad"],
-                [[c.rebar.designation, c.rebar.grade.name, coupler_label(c.kind), c.count] for c in couplers],
-                ["@", "@", "@", _FMT_MM], total=["TOTAL", None, None, sum(c.count for c in couplers)],
+                ws, row, ["Barra", "Grado", "Roscas largas", "Roscas cortas", "Acopladores"],
+                [[t.rebar.designation, t.rebar.grade.name, t.long, t.short, t.couplers] for t in threads],
+                ["@", "@", _FMT_MM, _FMT_MM, _FMT_MM],
+                total=["TOTAL", None, sum(t.long for t in threads), sum(t.short for t in threads),
+                       sum(t.couplers for t in threads)],
             )
 
         ws.column_dimensions["A"].width = 20

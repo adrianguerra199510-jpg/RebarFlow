@@ -2,7 +2,7 @@ import pytest
 
 from core.element import ElementType, StructuralElement
 from core.rebar import GRADE_40, get_rebar
-from core.shape_codes import StraightBar
+from core.shape_codes import LBar, StraightBar
 from engine.bbs_calculator import BBSCalculator, count_stock_bars, round_up_to_step
 
 
@@ -89,9 +89,22 @@ def test_packing_never_loses_material():
     assert bars >= -(-used // stock)
 
 
-def test_bar_longer_than_stock_is_rejected():
+def test_bent_bar_longer_than_stock_is_rejected():
+    bent = StructuralElement("V-1", ElementType.BEAM)
+    bent.add_group("A1", get_rebar("#6"), LBar(a=12500, b=300), 1)
     with pytest.raises(ValueError, match="excede la barra comercial"):
-        BBSCalculator().calculate([element(bars=[("A1", get_rebar("#6"), 12500, 1)])])
+        BBSCalculator().calculate([bent])
+
+
+def test_straight_bar_longer_than_stock_is_split_in_sub_marks_instead_of_rejected():
+    result = BBSCalculator().calculate([element(qty=2, bars=[("A1", get_rebar("#6"), 12500, 3)])])
+    (line,) = result.lines
+    assert [part.mark for part in line.parts] == ["A1.1", "A1.2"]  # traslape por omisión: barras iguales + el resto
+    assert [part.count for part in line.parts] == [1, 1] and line.parts[0].length_mm == 12000
+    assert sum(part.total_bars for part in line.parts) == 2 * 6  # 2 barras por unidad x 3 x 2 elementos
+    assert sum(part.total_weight_kg for part in line.parts) == pytest.approx(line.total_weight_kg)
+    assert sum(part.total_length_m for part in line.parts) == pytest.approx(line.total_length_m)
+    assert result.total_weight_kg == pytest.approx(line.total_weight_kg)  # los totales no cuentan doble
 
 
 def test_duplicate_element_in_same_level_is_rejected():

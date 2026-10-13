@@ -9,8 +9,9 @@ COMO USARLO
 4. Puede tener varios proyectos abiertos a la vez: cada uno es una pestana en la cinta
    "Proyectos" (bajo la barra de herramientas). Un clic cambia de proyecto; "Modificar" (o
    doble clic en la pestana) abre sus propiedades; "Nuevo" y "Duplicar" crean otra pestana.
-5. En una espiral puede elegir si llega en carrete o se arma con barras individuales; si es mas
-   larga que la barra comercial se une con traslape o con coupler.
+5. Una barra recta o una espiral de barras individuales mas larga que la barra comercial se divide
+   en sub-marcas (A1.1, A1.2...) unidas con traslape o con acoplador; con acoplador se elige la
+   rosca de cada extremo (larga + corta, corta + corta o larga + larga).
 6. Exporte la planilla con los botones "Exportar a Excel" y "Exportar a PDF".
 
 REQUISITOS
