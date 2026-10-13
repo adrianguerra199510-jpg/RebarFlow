@@ -35,7 +35,7 @@ from dataclasses import dataclass, fields, replace
 from typing import ClassVar, TypeVar
 
 from core.coupler import COUPLER_CHOICES  # noqa: F401 (se reexporta)
-from core.cutlength import CutLength, HookInfo  # noqa: F401 (se reexportan)
+from core.cutlength import CutLength, HookInfo, Supply  # noqa: F401 (se reexportan)
 from core.geometry import GeometryError  # noqa: F401
 from core.params import DEFAULT_LENGTH_MM, ParamSpec, param, validate_param  # noqa: F401
 from core.polybar import (  # noqa: F401
@@ -139,6 +139,14 @@ class ShapeCode(ABC):
     @abstractmethod
     def cut_length(self, rebar: Rebar) -> CutLength:
         """Longitud de corte para ``rebar``. Lanza :class:`GeometryError` si la forma es imposible."""
+
+    def supply(self, rebar: Rebar, stock_length_mm: float) -> Supply:
+        """Barras que se cortan para una unidad de la forma, dada la longitud de la barra comercial.
+
+        Por defecto, una sola barra del largo de corte (de rollo si ``from_coil``); una forma que pueda armarse con
+        varias barras unidas lo sobrescribe.
+        """
+        return Supply((self.cut_length(rebar).total_mm,), coil=type(self).from_coil)
 
     def sketch(self, rebar: Rebar | None = None) -> Sketch:
         """Esquema para planillas e interfaz; con ``rebar`` incluye el largo de los ganchos.

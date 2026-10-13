@@ -15,14 +15,17 @@ Las longitudes de corte se redondean **hacia arriba** al múltiplo de ``length_r
 from __future__ import annotations
 
 import math
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from itertools import groupby
 
-from core.coupler import COUPLER_ORDER
+from core.coupler import COUPLER_ORDER, coupler_text
+from core.cutlength import Supply
 from core.element import RebarGroup, StructuralElement
 from core.rebar import Rebar
 from core.shape_codes import ShapeCode
+from core.splice import pieces_text
 from engine.cutting_optimizer import CuttingPlan, compare_stock_lengths, optimize_cutting
 
 DEFAULT_STOCK_LENGTH_MM = 12_000.0
@@ -31,7 +34,11 @@ _EPS = 1e-6
 
 @dataclass(frozen=True)
 class ScheduleLine:
-    """Fila de la planilla: una marca dentro de un elemento."""
+    """Fila de la planilla: una marca dentro de un elemento.
+
+    ``cut_length_mm`` es el acero que consume cada unidad (suma de las barras que la arman, con los traslapes si los
+    hay) y ``supply`` las barras que se cortan para cada una, con sus largos redondeados.
+    """
 
     element: StructuralElement
     group: RebarGroup
@@ -40,6 +47,7 @@ class ScheduleLine:
     unit_weight_kg: float
     total_length_m: float
     total_weight_kg: float
+    supply: Supply
 
     @property
     def mark(self) -> str:
@@ -59,7 +67,7 @@ class ScheduleLine:
 
     @property
     def notes(self) -> tuple[str, ...]:
-        return self.group.cut.notes
+        return self.group.cut.notes + self.supply.notes
 
     @property
     def hook_text(self) -> str:
@@ -68,17 +76,27 @@ class ScheduleLine:
 
     @property
     def warnings(self) -> tuple[str, ...]:
-        return self.group.cut.warnings
+        return self.group.cut.warnings + self.supply.warnings
 
     @property
     def couplers(self) -> tuple[str, ...]:
-        """Tipo de coupler de cada extremo que lo lleva, por barra (``"short"`` o ``"long"``)."""
-        return self.group.cut.couplers
+        """Tipo de coupler de cada extremo que lo lleva y de cada unión entre barras, por unidad (``"short"``/``"long"``)."""
+        return self.group.cut.couplers + self.supply.couplers
 
     @property
     def coupler_text(self) -> str:
-        """Couplers de cada barra como ``"2 × rosca corta"`` (vacío si no lleva)."""
-        return self.group.cut.coupler_text
+        """Couplers de cada unidad como ``"2 × rosca corta"`` (vacío si no lleva)."""
+        return coupler_text(self.couplers)
+
+    @property
+    def pieces_text(self) -> str:
+        """Barras que arman cada unidad, p. ej. ``"3 × 12.00 m + 4.32 m"`` (vacío si es una sola barra o un rollo)."""
+        return "" if self.supply.coil else pieces_text(self.supply.pieces_mm)
+
+    @property
+    def joint_count(self) -> int:
+        """Uniones entre barras de cada unidad (traslapes o couplers de unión)."""
+        return 0 if self.supply.coil else len(self.supply.pieces_mm) - 1
 
 
 @dataclass(frozen=True)
@@ -241,6 +259,14 @@ class BBSResult:
         """Avisos de norma de la planilla como ``(elemento, marca, texto)``."""
         return tuple((line.element.name, line.mark, text) for line in self.lines for text in line.warnings)
 
+    @property
+    def supply_notes(self) -> tuple[tuple[str, str, str], ...]:
+        """Marcas armadas con varias barras unidas, como ``(elemento, marca, texto)``: cuántas barras y qué uniones."""
+        return tuple(
+            (line.element.name, line.mark, f"{line.supply.notes[0]} → {line.pieces_text}")
+            for line in self.lines if line.joint_count and line.supply.notes
+        )
+
     def coupler_counts(self) -> tuple[CouplerCount, ...]:
         """Couplers del proyecto por barra y tipo (barras por elemento x cantidad de elementos x extremos con coupler)."""
         counts: dict[tuple[Rebar, str], int] = {}
@@ -331,13 +357,14 @@ class BBSCalculator:
             marks: dict[float, list[str]] = {}
             coil_length_m = 0.0
             for line in group_lines:
-                if line.shape.from_coil:
+                if line.supply.coil:
                     coil_length_m += line.total_length_m
                     continue
-                pieces[line.cut_length_mm] = pieces.get(line.cut_length_mm, 0) + line.total_bars
                 name = f"{line.element.name}/{line.mark}"
-                if name not in marks.setdefault(line.cut_length_mm, []):
-                    marks[line.cut_length_mm].append(name)
+                for length, per_unit in Counter(line.supply.pieces_mm).items():
+                    pieces[length] = pieces.get(length, 0) + per_unit * line.total_bars
+                    if name not in marks.setdefault(length, []):
+                        marks[length].append(name)
             summaries.append(
                 DiameterSummary(
                     rebar=group_lines[0].rebar,
@@ -354,10 +381,15 @@ class BBSCalculator:
         return BBSResult(schedules, tuple(summaries), self.stock_length_mm, self.group_label)
 
     def _build_line(self, element: StructuralElement, group: RebarGroup) -> ScheduleLine:
-        cut_mm = round_up_to_step(group.cut_length_mm, self.length_rounding_mm)
-        if cut_mm > self.stock_length_mm + _EPS and not group.shape.from_coil:
+        supply = group.shape.supply(group.rebar, self.stock_length_mm)
+        rounded = tuple(round_up_to_step(piece, self.length_rounding_mm) for piece in supply.pieces_mm)
+        if len(rounded) > 1:  # las barras de una pieza armada nunca pasan de la comercial
+            rounded = tuple(min(piece, self.stock_length_mm) for piece in rounded)
+        supply = replace(supply, pieces_mm=rounded)
+        cut_mm = supply.material_mm
+        if not supply.coil and max(rounded) > self.stock_length_mm + _EPS:
             raise ValueError(
-                f"{element.name} / marca {group.mark}: la barra mide {cut_mm / 1000:.2f} m y excede la barra "
+                f"{element.name} / marca {group.mark}: la barra mide {max(rounded) / 1000:.2f} m y excede la barra "
                 f"comercial de {self.stock_length_mm / 1000:.2f} m; divídala en barras traslapadas."
             )
         total_bars = group.quantity * element.quantity
@@ -370,6 +402,7 @@ class BBSCalculator:
             unit_weight_kg=unit_weight,
             total_length_m=total_bars * cut_mm / 1000.0,
             total_weight_kg=total_bars * unit_weight,
+            supply=supply,
         )
 
     @staticmethod

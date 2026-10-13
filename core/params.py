@@ -12,6 +12,7 @@ de longitudes) y ``angles`` (lista de ángulos de giro).
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -32,15 +33,23 @@ class ParamSpec:
     minimum: float | None = None
     maximum: float | None = None
     hidden: bool = False  # lo gestiona otro control del formulario (p. ej. los ángulos del editor de tramos)
+    #: Condiciones ``(parámetro, valor)``: el parámetro solo se usa si todas se cumplen (el formulario lo deshabilita si no).
+    depends: tuple[tuple[str, Any], ...] = ()
+    auto_text: str = ""  # texto del valor «automático» (``None``) de un parámetro opcional, si no es el estándar de norma
+
+    def active(self, values: Mapping[str, Any]) -> bool:
+        """Si el parámetro se usa con los ``values`` dados (los valores que no conoce no lo desactivan)."""
+        return all(values.get(name, expected) == expected for name, expected in self.depends)
 
 
 def param(label: str, kind: str = "length", default: Any = DEFAULT_LENGTH_MM, *, optional: bool = False,
           choices: tuple[tuple[Any, str], ...] = (), minimum: float | None = None, maximum: float | None = None,
-          hidden: bool = False) -> Any:
+          hidden: bool = False, depends: tuple[tuple[str, Any], ...] = (), auto_text: str = "") -> Any:
     """Campo de ``dataclass`` con su descripción de parámetro (el nombre se toma del campo)."""
     if kind not in KINDS:
         raise ValueError(f"Tipo de parámetro desconocido: {kind!r}")
-    spec = ParamSpec("", label, kind, default, optional, tuple(choices), minimum, maximum, hidden)
+    spec = ParamSpec("", label, kind, default, optional, tuple(choices), minimum, maximum, hidden,
+                     tuple(depends), auto_text)
     return field(default=default, metadata={"spec": spec})
 
 

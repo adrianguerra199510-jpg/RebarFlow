@@ -92,6 +92,10 @@ def build_catalog_project() -> Project:
         ("ES1", n3, Spiral(diameter=400, pitch=75, height=2400), 2, "Espiral con 1.5 vueltas adicionales en cada extremo (rollo)"),
         ("ES2", n3, Spiral(diameter=400, pitch=75, height=2400, turns_start=2.0, turns_end=1.0, hook_start=135, hook_end=90),
          2, "Espiral con 2 vueltas al inicio, 1 al final y ganchos de 135° y 90°"),
+        ("ES3", n3, Spiral(diameter=400, pitch=75, height=2400, supply_mode="bars"), 2,
+         "Espiral de barras individuales unidas con traslapes (48 d)"),
+        ("ES4", n3, Spiral(diameter=400, pitch=75, height=2400, supply_mode="bars", joint="coupler", joint_coupler="long"), 2,
+         "Espiral de barras individuales unidas con couplers de rosca larga"),
         ("X1", n4, CustomBar(legs=(300.0, 200.0, 300.0, 250.0), angles=(90.0, -90.0, 60.0), hook_end=90), 6,
          "Forma dibujada a mano: 4 tramos, giros de 90°, −90° y 60° y gancho final de 90°"),
     ]

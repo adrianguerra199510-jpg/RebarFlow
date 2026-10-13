@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox, QTableWidget, QVBoxLayout, QWidget,
 )
 
+from core.coupler import coupler_text
 from core.element import ElementType, RebarGroup, StructuralElement
 from core.geometry import GeometryError
 from core.params import ParamSpec
@@ -20,6 +21,7 @@ from core.polybar import LETTERS
 from core.project import Project
 from core.rebar import GRADE_40, GRADE_60, GRADE_75, get_rebar, list_rebars
 from core.shape_codes import ShapeCode, available_shapes
+from core.splice import pieces_text
 from engine.bbs_calculator import round_up_to_step
 from exporters.logo import LogoError, normalize_logo
 from gui import style
@@ -529,7 +531,7 @@ class BarDialog(QDialog):
             spin.setRange(spec.minimum if spec.minimum is not None else (0 if spec.optional else 0.1), _MAX_DIMENSION_MM)
             spin.setSuffix(" mm")
             if spec.optional:
-                spin.setSpecialValueText("estándar (según norma)")
+                spin.setSpecialValueText(spec.auto_text or "estándar (según norma)")
         spin.setValue(0.0 if value is None else float(value))
         spin.valueChanged.connect(lambda *_: self._update())
         return spin
@@ -551,6 +553,21 @@ class BarDialog(QDialog):
             else:
                 self.param_form.addRow(f"{spec.label}:", widget)
 
+    def _sync_dependencies(self) -> None:
+        """Deshabilita los parámetros que no aplican con las opciones elegidas (p. ej. el traslape si la unión es coupler)."""
+        specs = self._shape_class().parameters()
+        values = {spec.name: self._read(spec) for spec in specs if spec.name in self._widgets and not spec.depends}
+        for spec in specs:
+            widget = self._widgets.get(spec.name)
+            if widget is None or not spec.depends:
+                continue
+            active = spec.active(values)
+            widget.setEnabled(active)
+            label = self.param_form.labelForField(widget)
+            if label is not None:
+                label.setEnabled(active)
+            values[spec.name] = self._read(spec) if active else None  # lo que depende de uno inactivo también lo está
+
     def _build_shape(self) -> ShapeCode:
         values: dict[str, object] = {}
         for spec in self._shape_class().parameters():
@@ -564,6 +581,7 @@ class BarDialog(QDialog):
     def _update(self) -> None:
         if not self._widgets:  # durante la construcción del formulario
             return
+        self._sync_dependencies()
         self._group = None
         error: str | None = None
         shape: ShapeCode | None = None
@@ -579,26 +597,37 @@ class BarDialog(QDialog):
             rebar = get_rebar(self.bar.currentData(), self.grade.currentData())
             group = RebarGroup(mark, rebar, shape, self.quantity.value(), self.description.text().strip())
             cut = group.cut
-            rounded = round_up_to_step(cut.total_mm, self._rounding)
-            if rounded > self._stock + 1e-6 and not shape.from_coil:
+            supply = shape.supply(rebar, self._stock)
+            pieces = tuple(round_up_to_step(piece, self._rounding) for piece in supply.pieces_mm)
+            if len(pieces) > 1:
+                pieces = tuple(min(piece, self._stock) for piece in pieces)
+            rounded = sum(pieces)
+            if not supply.coil and max(pieces) > self._stock + 1e-6:
                 raise ValueError(
-                    f"La barra mide {rounded / 1000:.2f} m y excede la barra comercial de {self._stock / 1000:.2f} m; "
+                    f"La barra mide {max(pieces) / 1000:.2f} m y excede la barra comercial de {self._stock / 1000:.2f} m; "
                     "divídala en barras traslapadas."
                 )
             weight = rebar.mass_for_length(rounded / 1000)
             theme = style.current()
+            length = f"{cut.total_mm:,.1f} mm → {rounded:,.0f} mm" if len(pieces) == 1 else f"{rounded:,.0f} mm"
             html = (
-                f"<b>Longitud de corte: {cut.total_mm:,.1f} mm → {rounded:,.0f} mm</b>"
+                f"<b>Longitud de corte: {length}</b>"
                 f" &nbsp;·&nbsp; peso unitario <b>{weight:,.2f} kg</b><br>"
                 f"<span style='color:{theme.muted}'>Σ cotas {cut.dimension_sum_mm:,.1f} mm &nbsp;·&nbsp; dobleces "
                 f"{cut.bend_adjustment_mm:+,.1f} mm &nbsp;·&nbsp; extensiones {cut.extension_mm:+,.1f} mm</span>"
             )
+            if len(pieces) > 1:
+                html += (f"<br><span style='color:{theme.muted}'>Desarrollo de la forma {cut.total_mm:,.1f} mm; "
+                         f"acero por unidad {rounded:,.0f} mm</span>")
+                html += f"<br><b>{len(pieces)} barras: {escape(pieces_text(pieces))}</b>"
             if cut.hooks:
                 html += f"<br><span style='color:{theme.hook}'>Ganchos (° · mm): {escape(cut.hook_text)}</span>"
-            if cut.couplers:
-                html += f"<br><span style='color:{theme.coupler}'>Couplers: {escape(cut.coupler_text)}</span>"
-            html += "".join(f"<br><span style='color:{theme.muted}'>{escape(n)}</span>" for n in cut.notes)
-            html += "".join(f"<br><span style='color:{theme.red}'><b>Aviso:</b> {escape(w)}</span>" for w in cut.warnings)
+            couplers = cut.couplers + supply.couplers
+            if couplers:
+                html += f"<br><span style='color:{theme.coupler}'>Couplers: {escape(coupler_text(couplers))}</span>"
+            html += "".join(f"<br><span style='color:{theme.muted}'>{escape(n)}</span>" for n in cut.notes + supply.notes)
+            html += "".join(f"<br><span style='color:{theme.red}'><b>Aviso:</b> {escape(w)}</span>"
+                            for w in cut.warnings + supply.warnings)
             self._group = group
         except (GeometryError, ValueError, TypeError) as exc:
             error = str(exc)

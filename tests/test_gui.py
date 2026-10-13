@@ -276,7 +276,7 @@ def test_bar_dialog_spiral_extra_turns_and_hooks(qapp):
     dialog = BarDialog(None)
     dialog.shape.setCurrentIndex(dialog.shape.findText("ES · Espiral"))
     assert list(dialog._widgets) == ["diameter", "pitch", "height", "turns_start", "turns_end", "hook_start", "ext_start",
-                                     "hook_end", "ext_end"]
+                                     "hook_end", "ext_end", "supply_mode", "joint", "lap_mm", "joint_coupler"]
     dialog._widgets["turns_start"].setValue(2.0)
     dialog._widgets["turns_end"].setValue(0.5)
     _choose(dialog, "hook_end", 90)
@@ -508,7 +508,7 @@ def test_other_element_type_and_project_remnant_setting(qapp, window):
 def test_open_catalog_example_from_the_menu(window):
     window.open_catalog()
     assert window.project.name == "Catálogo de formas" and not window.modified
-    assert window.bars_table.rowCount() == 24  # 23 marcas + subtotal
+    assert window.bars_table.rowCount() == 26  # 25 marcas + subtotal
     pictures = [r for r in range(window.bars_table.rowCount()) if window.bars_table.line_for_row(r)]
     assert all(not window.bars_table.item(r, 2).icon().isNull() for r in pictures)
     assert window.plan_table.rowCount() > 1 and window.act_catalog.text().startswith("Abrir ejemplo")
@@ -734,3 +734,34 @@ def _png_bytes() -> bytes:
     buffer = BytesIO()
     Image.new("RGB", (300, 100), (20, 100, 110)).save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def test_bar_dialog_spiral_supply_options_follow_the_choices(qapp):
+    dialog = BarDialog(None, stock_length_mm=12_000.0)
+    dialog.shape.setCurrentIndex(dialog.shape.findText("ES · Espiral"))
+    enabled = lambda: [name for name in ("supply_mode", "joint", "lap_mm", "joint_coupler") if dialog._widgets[name].isEnabled()]  # noqa: E731
+    assert enabled() == ["supply_mode"]  # carrete: no hay uniones
+    assert "Suministro: carrete" in dialog.info.text() and "barras:" not in dialog.info.text()
+    _choose(dialog, "supply_mode", "bars")
+    assert enabled() == ["supply_mode", "joint", "lap_mm"]  # traslape por omisión
+    _choose(dialog, "joint", "coupler")
+    assert enabled() == ["supply_mode", "joint", "joint_coupler"]
+    _choose(dialog, "joint_coupler", "long")
+    shape = dialog.result_group().shape
+    assert (shape.supply_mode, shape.joint, shape.joint_coupler) == ("bars", "coupler", "long")
+    assert "barras:" in dialog.info.text() and "Couplers: " in dialog.info.text() and "rosca larga" in dialog.info.text()
+    _choose(dialog, "joint", "lap")
+    dialog._widgets["lap_mm"].setValue(500.0)
+    assert dialog.result_group().shape.lap_mm == 500.0 and "traslapes de 500 mm" in dialog.info.text()
+    assert "Couplers: " not in dialog.info.text() and ok_enabled(dialog)
+    _choose(dialog, "supply_mode", "coil")
+    assert "Suministro: carrete" in dialog.info.text()
+
+
+def test_bar_dialog_spiral_from_bars_changes_the_steel_with_laps(qapp):
+    dialog = BarDialog(None, stock_length_mm=12_000.0)
+    dialog.shape.setCurrentIndex(dialog.shape.findText("ES · Espiral"))
+    coil_weight = dialog.info.text().split("peso unitario <b>")[1].split(" kg")[0]
+    _choose(dialog, "supply_mode", "bars")
+    bars_weight = dialog.info.text().split("peso unitario <b>")[1].split(" kg")[0]
+    assert float(bars_weight.replace(",", "")) > float(coil_weight.replace(",", ""))  # los traslapes consumen acero

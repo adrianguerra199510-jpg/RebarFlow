@@ -147,7 +147,8 @@ class ExcelExporter:
             _style(ws.cell(row, 1, "TOTAL GENERAL"), _HEADER_FONT, _RIGHT, fill=_HEADER_FILL)
             self._write_totals(ws, row, col, n_cols, result.total_length_m, result.total_weight_kg, header=True)
             row += 1
-        self._write_warnings(ws, row, n_cols, result)
+        row = self._write_warnings(ws, row, n_cols, result)
+        self._write_supply_notes(ws, row, n_cols, result)
 
         widths = {"Marca": 9, "Barra": 9, "Esquema": 41, "Long. corte (mm)": 13, "Cant. por elem.": 11,
                   "Total barras": 11, "Peso unit. (kg)": 12, "Long. total (m)": 13, "Peso total (kg)": 13}
@@ -173,11 +174,11 @@ class ExcelExporter:
             _style(ws.cell(row, col[name], value), font, alignment, number_format=fmt)
 
     @staticmethod
-    def _write_warnings(ws: Worksheet, row: int, n_cols: int, result: BBSResult) -> None:
-        """Avisos de norma bajo la planilla (las marcas con aviso van en rojo en la tabla)."""
+    def _write_warnings(ws: Worksheet, row: int, n_cols: int, result: BBSResult) -> int:
+        """Avisos de norma bajo la planilla (las marcas con aviso van en rojo en la tabla); devuelve la última fila usada."""
         warnings = result.warnings
         if not warnings:
-            return
+            return row
         row += 1
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=n_cols)
         _style(ws.cell(row, 1, "Avisos"), Font(name=_FONT, size=11, bold=True, color="C00000"), Alignment(vertical="center"))
@@ -185,6 +186,24 @@ class ExcelExporter:
             row += 1
             ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=n_cols)
             _style(ws.cell(row, 1, f"⚠ {element} · marca {mark}: {text}"), _WARNING, _LEFT)
+        return row
+
+    @staticmethod
+    def _write_supply_notes(ws: Worksheet, row: int, n_cols: int, result: BBSResult) -> int:
+        """Marcas armadas con varias barras unidas (espirales de barras individuales): qué barras y qué uniones."""
+        notes = result.supply_notes
+        if not notes:
+            return row
+        row += 1
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=n_cols)
+        _style(ws.cell(row, 1, "Suministro con uniones"), Font(name=_FONT, size=11, bold=True, color=_NAVY),
+               Alignment(vertical="center"))
+        for element, mark, text in notes:
+            row += 1
+            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=n_cols)
+            _style(ws.cell(row, 1, f"{element} · marca {mark}: {text}"), _BODY, _LEFT)
+        return row
+
     @staticmethod
     def _add_shape_image(ws: Worksheet, row: int, column: int, line: ScheduleLine) -> None:
         """Inserta el esquema de ``line`` centrado en la celda (fila alta, columna ``Esquema``)."""

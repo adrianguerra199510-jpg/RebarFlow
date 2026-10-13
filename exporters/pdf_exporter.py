@@ -140,6 +140,10 @@ class PdfExporter:
             story += [Paragraph("Avisos", ParagraphStyle("warn_title", parent=_SECTION, textColor=colors.HexColor(_RED)))]
             story += [Paragraph(f'<font color="{_RED}">⚠ {escape(element)} · marca {escape(mark)}: {escape(text)}</font>', _BASE)
                       for element, mark, text in result.warnings]
+        if result.supply_notes:  # espirales armadas con varias barras: cuántas y cómo se unen
+            story += [Paragraph("Suministro con uniones", _SECTION)]
+            story += [Paragraph(f"{escape(element)} · marca {escape(mark)}: {escape(text)}", _BASE)
+                      for element, mark, text in result.supply_notes]
         story += [PageBreak(), *self._summary(result, usable), PageBreak(), *self._cutting_plan(result, usable)]
 
         footer = f"{self.project_name}  ·  {issued}"

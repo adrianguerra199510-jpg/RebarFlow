@@ -25,6 +25,34 @@ class HookInfo:
 
 
 @dataclass(frozen=True)
+class Supply:
+    """Cómo se suministra una unidad de una forma: las barras que hay que cortar y el material que consume.
+
+    Casi siempre es una sola barra del largo de corte. Una espiral puede llegar en rollo (``coil``) o armarse con barras
+    individuales: si su desarrollo supera la barra comercial se hace con varias piezas unidas con traslapes (el material
+    crece con ellos) o con couplers (``couplers`` lista los de las uniones).
+
+    Attributes:
+        pieces_mm: Largo de cada barra que se corta para una unidad, sin redondear (un solo elemento si no hay uniones).
+        coil: Verdadero si la pieza sale de rollo y no de barras comerciales (no genera retales).
+        couplers: Tipo de coupler de cada unión entre barras, por unidad.
+        notes: Información para el doblador (cuántas barras, qué uniones).
+        warnings: Incumplimientos no fatales de la norma.
+    """
+
+    pieces_mm: tuple[float, ...]
+    coil: bool = False
+    couplers: tuple[str, ...] = ()
+    notes: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+
+    @property
+    def material_mm(self) -> float:
+        """Material total por unidad: la suma de las barras (incluye los traslapes)."""
+        return sum(self.pieces_mm)
+
+
+@dataclass(frozen=True)
 class CutLength:
     """Desglose de la longitud de corte (mm).
 

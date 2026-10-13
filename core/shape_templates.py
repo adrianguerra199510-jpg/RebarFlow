@@ -31,8 +31,8 @@ import math
 from dataclasses import dataclass, replace
 from typing import ClassVar
 
-from core.coupler import COUPLER_CHOICES
-from core.cutlength import CutLength
+from core.coupler import COUPLER_CHOICES, COUPLER_NONE, coupler_text
+from core.cutlength import CutLength, Supply
 from core.geometry import GeometryError
 from core.params import param
 from core.polybar import (
@@ -46,6 +46,14 @@ from core.polybar import (
     resolve_hook,
 )
 from core.rebar import BendUse, Rebar
+from core.splice import (
+    JOINT_CHOICES,
+    JOINT_COUPLER,
+    JOINT_LAP,
+    coupler_pieces,
+    lap_pieces,
+    standard_lap_mm,
+)
 from core.shape_codes import (
     HOOK_CHOICES,
     RING_HOOK_CHOICES,
@@ -430,6 +438,12 @@ class RingTie(ShapeCode):
         return [DimLabel(hook_label_text([info]), (0.0, 1.0), (0.0, 1.0), kind="hook") for info in present]
 
 
+SUPPLY_COIL = "coil"
+SUPPLY_BARS = "bars"
+SPIRAL_SUPPLY_CHOICES = ((SUPPLY_COIL, "Carrete (rollo continuo)"), (SUPPLY_BARS, "Barras individuales"))
+JOINT_COUPLER_CHOICES = tuple(choice for choice in COUPLER_CHOICES if choice[0] != COUPLER_NONE)
+
+
 @register_shape
 @dataclass(frozen=True)
 class Spiral(ShapeCode):
@@ -442,14 +456,17 @@ class Spiral(ShapeCode):
         L = N·√((π·(D − d))² + p²) + (turns_start + turns_end)·π·(D − d) + Σ (φ·R + extensión)
 
     Cada extremo admite además un gancho de 90° o 135°, que se dobla hacia el núcleo.
+
+    **Suministro.** La espiral puede llegar en ``coil`` (carrete: un solo alambre continuo, sin retales) o armarse con
+    ``bars`` (barras individuales). Con barras, si el desarrollo supera la barra comercial se une con ``joint``:
+    ``lap`` (traslape; el acero crece un traslape por unión) o ``coupler`` (barras a tope con un coupler por unión).
     """
 
     code: ClassVar[str] = "ES"
     name: ClassVar[str] = "Espiral"
-    from_coil: ClassVar[bool] = True
     description: ClassVar[str] = (
         "Hélice continua con vueltas adicionales al inicio y al final y ganchos opcionales de 90° o 135° "
-        "(refuerzo transversal de columnas circulares)."
+        "(refuerzo transversal de columnas circulares). Se suministra en carrete o con barras individuales."
     )
 
     diameter: float = param("A · diámetro exterior", default=400.0)
@@ -461,6 +478,14 @@ class Spiral(ShapeCode):
     ext_start: float | None = param("Extensión del gancho inicial", "length", None, optional=True)
     hook_end: int = param("Gancho final", "choice", 0, choices=RING_HOOK_CHOICES)
     ext_end: float | None = param("Extensión del gancho final", "length", None, optional=True)
+    supply_mode: str = param("Se suministra en", "choice", SUPPLY_COIL, choices=SPIRAL_SUPPLY_CHOICES)
+    joint: str = param("Unión de las barras", "choice", JOINT_LAP, choices=JOINT_CHOICES,
+                       depends=(("supply_mode", SUPPLY_BARS),))
+    lap_mm: float | None = param("Longitud del traslape", "length", None, optional=True,
+                                 depends=(("supply_mode", SUPPLY_BARS), ("joint", JOINT_LAP)),
+                                 auto_text="estándar (48·d, mín. 300 mm)")
+    joint_coupler: str = param("Tipo de coupler de la unión", "choice", "short", choices=JOINT_COUPLER_CHOICES,
+                               depends=(("supply_mode", SUPPLY_BARS), ("joint", JOINT_COUPLER)))
 
     @classmethod
     def migrate(cls, parameters: dict[str, object]) -> dict[str, object]:
@@ -508,6 +533,32 @@ class Spiral(ShapeCode):
             ),
             warnings=tuple(warnings),
             hooks=hooks.infos,
+        )
+
+    def supply(self, rebar: Rebar, stock_length_mm: float) -> Supply:
+        total = self.cut_length(rebar).total_mm
+        if self.supply_mode == SUPPLY_COIL:
+            return Supply((total,), coil=True, notes=("Suministro: carrete (rollo continuo), sin uniones",))
+        if total <= stock_length_mm + 1e-6:
+            return Supply((total,), notes=("Suministro: una barra individual, sin uniones",))
+        if self.joint == JOINT_COUPLER:
+            pieces = coupler_pieces(total, stock_length_mm)
+            couplers = (self.joint_coupler,) * (len(pieces) - 1)
+            return Supply(
+                pieces, couplers=couplers,
+                notes=(f"Suministro: {len(pieces)} barras unidas a tope con {coupler_text(couplers)}",),
+            )
+        standard = standard_lap_mm(rebar)
+        lap = standard if self.lap_mm is None else self.lap_mm
+        pieces = lap_pieces(total, stock_length_mm, lap)
+        warnings = ()
+        if lap < standard - 1e-6:
+            warnings = (f"Traslape de {lap:.0f} mm menor que el de norma para espirales "
+                        f"(48·d, mín. 300 mm = {standard:.0f} mm; ACI 318)",)
+        return Supply(
+            pieces, warnings=warnings,
+            notes=(f"Suministro: {len(pieces)} barras con {len(pieces) - 1} traslapes de {lap:.0f} mm "
+                   f"(el acero crece {(len(pieces) - 1) * lap / 1000:.2f} m por espiral)",),
         )
 
     def sketch(self, rebar: Rebar | None = None) -> Sketch:

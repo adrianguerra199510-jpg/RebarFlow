@@ -94,16 +94,18 @@ class BarDetailPanel(QFrame):
             _row("Ajuste por dobleces", f"{cut.bend_adjustment_mm:+,.1f} mm"),
             _row("Ganchos (° · mm)", line.hook_text or "—"),
             _row("Extensiones de gancho", f"{cut.extension_mm:,.1f} mm"),
-            *([_row("Couplers", escape(line.coupler_text))] if cut.couplers else []),
-            _row("Longitud de corte", f"{cut.total_mm:,.1f} → {line.cut_length_mm:,.0f} mm"),
+            *([_row("Couplers", escape(line.coupler_text))] if line.couplers else []),
+            _row("Longitud de corte", f"{cut.total_mm:,.1f} → {line.cut_length_mm:,.0f} mm" if not line.joint_count else
+                 f"{cut.total_mm:,.1f} → {line.cut_length_mm:,.0f} mm (con uniones)"),
+            *([_row("Barras por unidad", f"{line.joint_count + 1}: {escape(line.pieces_text)}")] if line.joint_count else []),
             _row("Peso unitario", f"{line.unit_weight_kg:,.2f} kg"),
             _row("Barras", f"{line.group.quantity} × {line.element.quantity} elem. = {line.total_bars}"),
             _row("Longitud / peso total", f"{line.total_length_m:,.2f} m · {line.total_weight_kg:,.2f} kg"),
         ]
         html = f"<table cellspacing='3'>{''.join(rows)}</table>"
         theme = style.current()
-        html += "".join(f"<p style='color:{theme.muted}'>{escape(note)}</p>" for note in cut.notes)
-        html += "".join(f"<p style='color:{theme.red}'><b>Aviso:</b> {escape(w)}</p>" for w in cut.warnings)
+        html += "".join(f"<p style='color:{theme.muted}'>{escape(note)}</p>" for note in line.notes)
+        html += "".join(f"<p style='color:{theme.red}'><b>Aviso:</b> {escape(w)}</p>" for w in line.warnings)
         if line.group.description:
             html += f"<p><i>{escape(line.group.description)}</i></p>"
         self.title.setText(f"Marca {escape(line.mark)}  ·  {escape(line.rebar.label)}  ·  {escape(line.rebar.grade.name)}")
