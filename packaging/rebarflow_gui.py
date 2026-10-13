@@ -70,15 +70,17 @@ def self_test(folder: Path) -> int:
         report.append("espirales de barras: " + "; ".join(f"{l.mark} {l.pieces_text} ({l.coupler_text or 'traslapes'})"
                                                              for l in spirals))
         # Modo nocturno (sin guardar la preferencia): el botón de la esquina superior derecha cambia toda la interfaz.
+        from gui import style
+
+        previous = style.preferred_dark()  # el clic recuerda el tema: se restituye para no tocar la preferencia del usuario
         window.theme_button.click()
         app.processEvents()
         window.grab().save(str(folder / "nocturno.png"))
-        from gui import style
-
         if not style.current().dark:
             raise RuntimeError("el botón de tema no activó el modo nocturno")
         report.append(f"modo nocturno: {window.act_theme.text()!r}")
         window.set_dark_mode(False, remember=False)
+        style.remember_dark(previous)
         for name in ("ventana.png", "planilla.xlsx", "planilla.pdf", "proyecto.rebarflow",
                      "catalogo.png", "catalogo.xlsx", "catalogo.pdf", "puente.xlsx", "puente.pdf", "nocturno.png"):
             size = (folder / name).stat().st_size

@@ -21,7 +21,7 @@ from gui import style  # noqa: E402
 from gui.dialogs import ProjectDialog  # noqa: E402
 from gui.main_window import MainWindow  # noqa: E402
 from sample_project import build_bridge_project, build_project  # noqa: E402
-from tests.test_gui import click_button, qapp  # noqa: E402,F401  (fixture)
+from tests.test_gui import _isolate_theme, click_button, qapp  # noqa: E402,F401  (fixtures)
 
 
 @pytest.fixture
@@ -121,7 +121,7 @@ def test_tabs_of_projects_with_the_same_name_are_told_apart(window):
 
 
 # ------------------------------------------------------------------ modificar
-def test_the_modify_button_edits_the_active_project(window, monkeypatch):
+def test_the_modify_project_button_edits_the_active_project(window, monkeypatch):
     window.open_bridge()
     opened: list[str] = []
 
@@ -131,7 +131,7 @@ def test_the_modify_button_edits_the_active_project(window, monkeypatch):
         return True
 
     monkeypatch.setattr(ProjectDialog, "exec", fake_exec)
-    window.project_bar.btn_edit.click()
+    window.act_props.trigger()
     assert opened == ["Paso inferior de ejemplo"] and window.sessions[1].project.name == "Puente renombrado"
     assert window.sessions[0].project.name != "Puente renombrado"
     assert window.sessions[1].modified and titles(window)[1] == "•  Puente renombrado"
@@ -157,7 +157,7 @@ def test_duplicate_makes_an_independent_unsaved_copy(window):
     assert window.session.modified and window.path is None and len(copy.elements) == n
     window.add_element_values("SOLO-COPIA", copy.elements[0].element_type)
     assert len(original.elements) == n and not window.sessions[0].modified
-    window.project_bar.btn_copy.click()
+    window.act_duplicate.trigger()
     assert window.project.name == f"{original.name} (copia) (copia)" and len(window.sessions) == 3
 
 
@@ -301,10 +301,10 @@ def test_context_menu_actions(window):
     def choose(index: int, text: str) -> None:
         menu = window._build_project_menu(index)
         assert [a.text() for a in menu.actions() if a.text()] == [
-            "Modificar propiedades…", "Duplicar", "Guardar", "Cerrar", "Cerrar los demás"]
+            "Modificar proyecto…", "Duplicar proyecto", "Guardar proyecto", "Cerrar proyecto", "Cerrar los demás"]
         next(a for a in menu.actions() if a.text() == text).trigger()
 
-    choose(0, "Duplicar")
+    choose(0, "Duplicar proyecto")
     assert len(window.sessions) == 3 and window.project.name == "Edificio de ejemplo (copia)"
     window.session.modified = False
     choose(2, "Cerrar los demás")
@@ -347,3 +347,53 @@ def test_ribbon_is_styled_in_both_themes_and_marks_the_active_close_button(windo
     window.select_project(0)
     assert [tabs.tabButton(i, side).property("current") for i in range(2)] == [True, False]
     window.set_dark_mode(False, remember=False)
+
+
+# ------------------------------------------------------------------ botones de proyecto en la barra de herramientas
+def toolbar_actions(window):
+    toolbar = next(t for t in window.findChildren(type(window.ribbon)) if t.windowTitle() == "Principal")
+    return toolbar, [a for a in toolbar.actions() if not a.isSeparator()]
+
+
+def test_project_buttons_live_in_the_main_toolbar_with_project_names(window):
+    toolbar, actions = toolbar_actions(window)
+    assert [a.iconText() for a in actions][:5] == [
+        "Nuevo proyecto", "Abrir proyecto", "Guardar proyecto", "Modificar proyecto", "Duplicar proyecto"]
+    assert actions[:5] == [window.act_new, window.act_open, window.act_save, window.act_props, window.act_duplicate]
+    assert toolbar.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextUnderIcon and toolbar.iconSize().width() == 32
+    assert all(not a.icon().isNull() for a in actions)
+
+
+def test_the_ribbon_has_only_the_project_tabs(window):
+    from PySide6.QtWidgets import QToolButton  # noqa: PLC0415
+
+    # solo quedan las «×» de las pestañas y los botones de desplazamiento propios de la barra de pestañas
+    buttons = [b for b in window.project_bar.findChildren(QToolButton) if b.objectName() not in ("tabClose", "ScrollLeftButton", "ScrollRightButton")]
+    assert buttons == [] and not hasattr(window.project_bar, "btn_edit")
+    assert window.project_bar.label.text() == "Proyectos"
+
+
+def test_project_toolbar_buttons_act_on_the_active_project(window, monkeypatch):
+    window.open_bridge()
+    toolbar, _ = toolbar_actions(window)
+    from PySide6.QtWidgets import QToolButton  # noqa: PLC0415
+
+    def button(action):
+        return next(b for b in toolbar.findChildren(QToolButton) if b.defaultAction() is action)
+
+    button(window.act_duplicate).click()
+    assert len(window.sessions) == 3 and window.project.name == "Paso inferior de ejemplo (copia)"
+    button(window.act_new).click()
+    assert len(window.sessions) == 4 and window.project.name == "Proyecto sin título"
+    seen: list[str] = []
+    monkeypatch.setattr(ProjectDialog, "exec", lambda self: seen.append(self.name.text()) and False)
+    window.select_project(1)
+    button(window.act_props).click()
+    assert seen == ["Paso inferior de ejemplo"]
+
+
+def test_menus_use_the_project_names_too(window):
+    assert [window.act_new.text(), window.act_open.text(), window.act_save.text(), window.act_save_as.text(),
+            window.act_props.text(), window.act_duplicate.text(), window.act_close_project.text()] == [
+        "Nuevo proyecto", "Abrir proyecto…", "Guardar proyecto", "Guardar proyecto como…", "Modificar proyecto…",
+        "Duplicar proyecto", "Cerrar proyecto"]

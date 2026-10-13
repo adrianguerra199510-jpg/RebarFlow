@@ -209,14 +209,15 @@ comercial (6, 9 y 12 m) y se recomienda la que menos acero compra.
 
 ## Interfaz gráfica
 
-* **Varios proyectos a la vez (cinta de proyectos)**: bajo la barra de herramientas hay una pestaña por proyecto abierto. Un clic en una
-  pestaña cambia de proyecto (cada uno recuerda su elemento seleccionado y su pestaña); **Modificar** (o doble clic en la pestaña)
-  abre las propiedades del proyecto —nombre, datos de la obra, barra comercial, logo…—, **Nuevo** crea un proyecto vacío,
-  **Duplicar** hace una copia independiente y la **×** de la pestaña lo cierra (pregunta si tiene cambios sin guardar; un «•» en
-  la pestaña los marca). Las pestañas se reordenan arrastrándolas y el clic derecho ofrece modificar, duplicar, guardar, cerrar y
-  cerrar los demás. *Abrir*, *Abrir ejemplo…* y *Nuevo* abren cada proyecto en una pestaña nueva (un archivo ya abierto solo se
-  selecciona; el proyecto vacío del arranque se reemplaza). Menú *Proyecto*, Ctrl+W (cerrar), Ctrl+PgUp / Ctrl+PgDn (anterior /
-  siguiente) y *Archivo → Guardar todos* (Ctrl+Alt+S). Al salir se pregunta por cada proyecto con cambios.
+* **Barra de herramientas y varios proyectos a la vez**: los botones de proyecto van arriba, con icono propio y nombre completo —**Nuevo
+  proyecto, Abrir proyecto, Guardar proyecto, Modificar proyecto** (nombre, datos de la obra, barra comercial, logo…) y **Duplicar proyecto**
+  (copia independiente)—, seguidos de los de elemento, barra, exportación y detalle. Debajo, la **cinta de proyectos** tiene una
+  pestaña por proyecto abierto: un clic cambia de proyecto (cada uno recuerda su elemento seleccionado y su pestaña), el doble clic
+  abre sus propiedades y la **×** lo cierra (pregunta si tiene cambios sin guardar; un «•» en la pestaña los marca). Las pestañas se
+  reordenan arrastrándolas y el clic derecho ofrece modificar, duplicar, guardar, cerrar y cerrar los demás. *Abrir proyecto*, *Abrir
+  ejemplo…* y *Nuevo proyecto* abren cada proyecto en una pestaña nueva (un archivo ya abierto solo se selecciona; el proyecto vacío
+  del arranque se reemplaza). Menú *Proyecto*, Ctrl+W (cerrar), Ctrl+PgUp / Ctrl+PgDn (anterior / siguiente) y *Archivo → Guardar todos
+  los proyectos* (Ctrl+Alt+S). Al salir se pregunta por cada proyecto con cambios.
 * **Árbol del proyecto**: proyecto → estructura / nivel → subestructura → elemento. Los dos niveles de agrupación son
   **opcionales** (un puente no tiene niveles: ver *Obras sin niveles*); el tipo de elemento puede ser viga, columna, zapata, losa, muro u **otros**.
 * **Barras del elemento**: tabla con el dibujo de cada forma, sus cotas y el largo de los ganchos.
@@ -237,7 +238,13 @@ comercial (6, 9 y 12 m) y se recomienda la que menos acero compra.
 
 ![Barras de un elemento](docs/ui_barras.png)
 
-![Cinta de proyectos](docs/ui_proyectos.png)
+![Barra de herramientas y cinta de proyectos](docs/ui_proyectos.png)
+
+**Iconos.** Cada botón tiene un icono propio dibujado en código (`gui/icons.py`, sin archivos de imagen): el objeto —hoja del proyecto,
+carpeta, disco, cubo del elemento, barra doblada— y la acción como insignia (más verde = nuevo, lápiz = editar, cruz roja = eliminar).
+Siguen el tema claro o nocturno y tienen variante deshabilitada; se usan también en los menús, el árbol y los botones de barras.
+
+![Iconos](docs/iconos.png)
 
 | Planilla del proyecto | Resumen |
 |---|---|
@@ -297,7 +304,7 @@ exporters/
   cutting_images.py PNG de cada barra comercial con sus piezas y su retal
   excel_exporter.py libro Excel con esquemas (openpyxl)
   pdf_exporter.py   planilla en PDF con esquemas (reportlab)
-gui/                interfaz PySide6: ventana principal, cinta de proyectos (project_bar.py, session.py), diálogos, tablas, temas claro y nocturno (style.py)
+gui/                interfaz PySide6: ventana principal, cinta de proyectos (project_bar.py, session.py), iconos (icons.py), diálogos, tablas, temas claro y nocturno (style.py)
 sample_project.py   proyectos de ejemplo (edificio y catálogo de formas)
 main.py             ejemplo por consola
 packaging/          lanzador, .spec de PyInstaller, icono, build_windows.bat y LEEME del .exe

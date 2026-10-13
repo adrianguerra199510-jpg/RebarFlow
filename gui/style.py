@@ -91,6 +91,8 @@ QMenu::item:selected {{ background: {t.selection}; color: {t.selection_text}; }}
 QMenu::item:disabled {{ color: {t.disabled}; }}
 QToolBar {{ background: {t.toolbar}; border: 0; border-bottom: 2px solid {t.toolbar_border}; spacing: 3px; padding: 4px; }}
 QToolButton {{ padding: 5px 9px; border-radius: 4px; color: {t.text}; }}
+QToolBar#mainToolbar {{ spacing: 1px; }}
+QToolBar#mainToolbar QToolButton {{ padding: 4px 5px 3px 5px; }}
 QToolButton:hover {{ background: {t.hover}; }}
 QToolButton:checked {{ background: {t.hover}; }}
 QToolButton:disabled {{ color: {t.disabled}; }}
@@ -140,8 +142,6 @@ QTabBar#projectTabs::tab:selected {{ background: {t.header}; color: {t.header_te
 QToolButton#tabClose {{ border: 0; border-radius: 9px; color: {t.muted}; font-size: 12pt; font-weight: bold; padding: 0; }}
 QToolButton#tabClose[current="true"] {{ color: {t.header_text}; }}
 QToolButton#tabClose:hover {{ background: {t.red}; color: #FFFFFF; }}
-QToolButton#ribbonButton {{ border: 1px solid {t.border}; background: {t.panel}; padding: 4px 12px 4px 8px; margin-bottom: 4px; }}
-QToolButton#ribbonButton:hover {{ background: {t.hover}; }}
 """
 
 

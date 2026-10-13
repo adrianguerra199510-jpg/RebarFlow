@@ -5,12 +5,12 @@ from __future__ import annotations
 from html import escape
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
     QApplication, QDockWidget, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox, QPushButton,
-    QSplitter, QStyle, QTabWidget, QToolBar, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QSplitter, QTabWidget, QToolBar, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from core.element import ElementType, StructuralElement
@@ -21,6 +21,7 @@ from exporters.excel_exporter import ExcelExporter
 from exporters.pdf_exporter import PdfExporter
 from gui import style
 from gui.dialogs import BarDialog, ElementDialog, ProjectDialog
+from gui import icons
 from gui.icon import theme_icon
 from gui.project_bar import ProjectBar
 from gui.session import ProjectSession
@@ -44,6 +45,7 @@ class MainWindow(QMainWindow):
         self._index = 0
         self.result: BBSResult | None = None
         self.error: str | None = None
+        self._icon_names: dict[QAction, str] = {}
 
         self._build_ui()
         self._build_actions()
@@ -156,69 +158,84 @@ class MainWindow(QMainWindow):
         self.totals_label = QLabel()
         self.statusBar().addPermanentWidget(self.totals_label)
 
-    def _action(self, text: str, slot, *, icon: QStyle.StandardPixmap | None = None, shortcut=None,
-                tip: str = "") -> QAction:
+    def _action(self, text: str, slot, *, icon: str | None = None, shortcut=None, tip: str = "") -> QAction:
+        """Acción de la ventana; ``icon`` es el nombre de un icono de :mod:`gui.icons` (se repinta al cambiar de tema)."""
         action = QAction(text, self)
         if icon is not None:
-            action.setIcon(self.style().standardIcon(icon))
+            self._icon_names[action] = icon
+            action.setIcon(icons.icon(icon))
         if shortcut is not None:
             action.setShortcut(shortcut)
         action.setStatusTip(tip or text)
         action.triggered.connect(lambda *_: slot())
         return action
 
-    def _build_actions(self) -> None:
-        sp = QStyle.StandardPixmap
-        self.act_new = self._action("Nuevo", self.new_project, icon=sp.SP_FileIcon, shortcut=QKeySequence.StandardKey.New,
-                                    tip="Crea un proyecto vacío en una pestaña nueva")
-        self.act_open = self._action("Abrir…", self.open_project, icon=sp.SP_DialogOpenButton,
-                                     shortcut=QKeySequence.StandardKey.Open)
-        self.act_sample = self._action("Abrir ejemplo", self.open_sample, icon=sp.SP_DirHomeIcon,
-                                       tip="Carga un proyecto de ejemplo (cimentación y 2 niveles)")
-        self.act_catalog = self._action("Abrir ejemplo: catálogo de formas", self.open_catalog,
-                                        tip="Carga un proyecto con una barra de cada plantilla de forma")
-        self.act_bridge = self._action("Abrir ejemplo: puente (sin niveles)", self.open_bridge,
-                                       tip="Carga un proyecto organizado por estructura y subestructura, sin niveles")
-        self.act_save = self._action("Guardar", self.save_project_file, icon=sp.SP_DialogSaveButton,
-                                     shortcut=QKeySequence.StandardKey.Save)
-        self.act_save_as = self._action("Guardar como…", self.save_project_as, shortcut=QKeySequence.StandardKey.SaveAs)
-        self.act_props = self._action("Propiedades del proyecto…", self.edit_project_properties,
-                                      icon=sp.SP_FileDialogDetailedView)
-        self.act_quit = self._action("Salir", self.close, shortcut=QKeySequence.StandardKey.Quit)
-        self.act_save_all = self._action("Guardar todos", self.save_all, shortcut="Ctrl+Alt+S",
-                                         tip="Guarda todos los proyectos abiertos que tengan cambios")
-        self.act_duplicate = self._action("Duplicar proyecto", self.duplicate_project,
-                                          tip="Crea una copia del proyecto activo en una pestaña nueva")
-        self.act_close_project = self._action("Cerrar proyecto", self.close_project, shortcut="Ctrl+W",
-                                              tip="Cierra el proyecto activo (pregunta si tiene cambios sin guardar)")
-        self.act_next_project = self._action("Proyecto siguiente", lambda: self._step_project(1), shortcut="Ctrl+PgDown")
-        self.act_prev_project = self._action("Proyecto anterior", lambda: self._step_project(-1), shortcut="Ctrl+PgUp")
+    def _apply_icons(self) -> None:
+        """Vuelve a pedir los iconos con la paleta del tema actual (tras cambiar de claro a nocturno o al revés)."""
+        for action, name in self._icon_names.items():
+            action.setIcon(icons.icon(name))
+        for button, name in ((self.btn_add_bar, "new_bar"), (self.btn_edit_bar, "edit_bar"),
+                             (self.btn_delete_bar, "delete_bar")):
+            button.setIcon(icons.icon(name))
 
-        self.act_add_element = self._action("Nuevo elemento", self.add_element, icon=sp.SP_FileDialogNewFolder,
-                                            shortcut="Ctrl+Shift+N")
-        self.act_edit_element = self._action("Editar elemento", self.edit_element, icon=sp.SP_FileDialogContentsView)
-        self.act_delete_element = self._action("Eliminar elemento", self.delete_element, icon=sp.SP_TrashIcon)
-        self.act_add_bar = self._action("Nueva barra", self.add_bar, icon=sp.SP_FileDialogStart, shortcut="Ctrl+B")
-        self.act_edit_bar = self._action("Editar barra", self.edit_bar, icon=sp.SP_FileDialogInfoView)
-        self.act_delete_bar = self._action("Eliminar barra", self.delete_bar, icon=sp.SP_DialogDiscardButton)
-        self.act_excel = self._action("Exportar a Excel…", self.export_excel, icon=sp.SP_ArrowDown, shortcut="Ctrl+E",
+    def _build_actions(self) -> None:
+        self.act_new = self._action("Nuevo proyecto", self.new_project, icon="new_project",
+                                    shortcut=QKeySequence.StandardKey.New, tip="Crea un proyecto vacío en una pestaña nueva")
+        self.act_open = self._action("Abrir proyecto…", self.open_project, icon="open_project",
+                                     shortcut=QKeySequence.StandardKey.Open,
+                                     tip="Abre uno o varios archivos de proyecto, cada uno en su pestaña")
+        self.act_sample = self._action("Abrir ejemplo", self.open_sample, icon="sample",
+                                       tip="Carga un proyecto de ejemplo (cimentación y 2 niveles)")
+        self.act_catalog = self._action("Abrir ejemplo: catálogo de formas", self.open_catalog, icon="catalog",
+                                        tip="Carga un proyecto con una barra de cada plantilla de forma")
+        self.act_bridge = self._action("Abrir ejemplo: puente (sin niveles)", self.open_bridge, icon="bridge",
+                                       tip="Carga un proyecto organizado por estructura y subestructura, sin niveles")
+        self.act_save = self._action("Guardar proyecto", self.save_project_file, icon="save_project",
+                                     shortcut=QKeySequence.StandardKey.Save, tip="Guarda el proyecto activo en su archivo")
+        self.act_save_as = self._action("Guardar proyecto como…", self.save_project_as, icon="save_as",
+                                        shortcut=QKeySequence.StandardKey.SaveAs)
+        self.act_props = self._action("Modificar proyecto…", self.edit_project_properties, icon="edit_project",
+                                      tip="Modifica el proyecto activo: nombre, datos de la obra, barra comercial, logo…")
+        self.act_quit = self._action("Salir", self.close, shortcut=QKeySequence.StandardKey.Quit)
+        self.act_save_all = self._action("Guardar todos los proyectos", self.save_all, icon="save_all",
+                                         shortcut="Ctrl+Alt+S", tip="Guarda todos los proyectos abiertos que tengan cambios")
+        self.act_duplicate = self._action("Duplicar proyecto", self.duplicate_project, icon="duplicate_project",
+                                          tip="Crea una copia del proyecto activo en una pestaña nueva")
+        self.act_close_project = self._action("Cerrar proyecto", self.close_project, icon="close_project",
+                                              shortcut="Ctrl+W",
+                                              tip="Cierra el proyecto activo (pregunta si tiene cambios sin guardar)")
+        self.act_next_project = self._action("Proyecto siguiente", lambda: self._step_project(1), icon="next_project",
+                                             shortcut="Ctrl+PgDown")
+        self.act_prev_project = self._action("Proyecto anterior", lambda: self._step_project(-1),
+                                             icon="previous_project", shortcut="Ctrl+PgUp")
+
+        self.act_add_element = self._action("Nuevo elemento", self.add_element, icon="new_element", shortcut="Ctrl+Shift+N")
+        self.act_edit_element = self._action("Editar elemento", self.edit_element, icon="edit_element")
+        self.act_delete_element = self._action("Eliminar elemento", self.delete_element, icon="delete_element")
+        self.act_add_bar = self._action("Nueva barra", self.add_bar, icon="new_bar", shortcut="Ctrl+B")
+        self.act_edit_bar = self._action("Editar barra", self.edit_bar, icon="edit_bar")
+        self.act_delete_bar = self._action("Eliminar barra", self.delete_bar, icon="delete_bar")
+        self.act_excel = self._action("Exportar a Excel…", self.export_excel, icon="export_excel", shortcut="Ctrl+E",
                                       tip="Planilla en Excel con el esquema de cada barra")
-        self.act_pdf = self._action("Exportar a PDF…", self.export_pdf, icon=sp.SP_DialogSaveButton, shortcut="Ctrl+P",
+        self.act_pdf = self._action("Exportar a PDF…", self.export_pdf, icon="export_pdf", shortcut="Ctrl+P",
                                     tip="Planilla en PDF con el esquema de cada barra")
         self.act_about = self._action("Acerca de RebarFlow", self.about)
         # Mostrar u ocultar el panel de detalle (la X del panel lo cierra; esta acción lo vuelve a abrir).
         self.act_detail = self.detail_dock.toggleViewAction()
         self.act_detail.setText("Detalle de barra")
         self.act_detail.setShortcut("F4")
-        self.act_detail.setIcon(self.style().standardIcon(sp.SP_FileDialogInfoView))
+        self._icon_names[self.act_detail] = "detail"
+        self.act_detail.setIcon(icons.icon("detail"))
         self.act_detail.setStatusTip("Muestra u oculta el panel con el dibujo grande y el cálculo de la barra seleccionada")
         self.act_theme = self._action("Modo nocturno", self.toggle_theme, shortcut="Ctrl+Shift+D",
                                       tip="Cambia entre la interfaz clara y la nocturna")
 
         toolbar = QToolBar("Principal")
+        toolbar.setObjectName("mainToolbar")
         toolbar.setMovable(False)
-        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        for group in ((self.act_new, self.act_open, self.act_save),
+        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+        toolbar.setIconSize(QSize(32, 32))
+        for group in ((self.act_new, self.act_open, self.act_save, self.act_props, self.act_duplicate),
                       (self.act_add_element, self.act_add_bar, self.act_edit_bar, self.act_delete_bar),
                       (self.act_excel, self.act_pdf)):
             for action in group:
@@ -233,8 +250,6 @@ class MainWindow(QMainWindow):
         self.project_bar.selected.connect(self.select_project)
         self.project_bar.close_requested.connect(self.close_project)
         self.project_bar.edit_requested.connect(self.edit_project_properties)
-        self.project_bar.duplicate_requested.connect(self.duplicate_project)
-        self.project_bar.new_requested.connect(self.new_project)
         self.project_bar.moved.connect(self._on_project_moved)
         self.project_bar.menu_requested.connect(self._project_menu)
         ribbon = QToolBar("Proyectos")
@@ -274,6 +289,7 @@ class MainWindow(QMainWindow):
         self.theme_button.setCursor(Qt.CursorShape.PointingHandCursor)
         menu.setCornerWidget(self.theme_button, Qt.Corner.TopRightCorner)
         self._update_theme_action()
+        self._apply_icons()
 
         # Ins / Supr actúan sobre la lista de barras cuando tiene el foco.
         for action, key in ((self.act_delete_bar, "Delete"), (self.act_edit_bar, "Return")):
@@ -300,6 +316,7 @@ class MainWindow(QMainWindow):
         if remember:
             style.remember_dark(dark)
         self._update_theme_action()
+        self._apply_icons()
         line = self.current_line()
         self.refresh(select_mark=line.mark if line else None)
 
@@ -326,11 +343,10 @@ class MainWindow(QMainWindow):
         self._update_chrome()
 
     def _rebuild_tree(self, target: StructuralElement | None) -> None:
-        style = self.style()
         self.tree.blockSignals(True)
         self.tree.clear()
         root = QTreeWidgetItem([self.project.name])
-        root.setIcon(0, style.standardIcon(QStyle.StandardPixmap.SP_DirHomeIcon))
+        root.setIcon(0, icons.icon("project"))
         self.tree.addTopLevelItem(root)
         nodes: dict[tuple[str, ...], QTreeWidgetItem] = {(): root}
         selected_item: QTreeWidgetItem | None = None
@@ -340,10 +356,10 @@ class MainWindow(QMainWindow):
             for depth in range(1, len(path) + 1):
                 if path[:depth] not in nodes:
                     node = QTreeWidgetItem(nodes[path[:depth - 1]], [path[depth - 1]])
-                    node.setIcon(0, style.standardIcon(QStyle.StandardPixmap.SP_DirIcon))
+                    node.setIcon(0, icons.icon("group"))
                     nodes[path[:depth]] = node
             item = QTreeWidgetItem(nodes[path], [f"{element.name}  ·  {element.element_type.value}  ×{element.quantity}"])
-            item.setIcon(0, style.standardIcon(QStyle.StandardPixmap.SP_FileIcon))
+            item.setIcon(0, icons.icon("element"))
             item.setData(0, Qt.ItemDataRole.UserRole, index)
             first_item = first_item or item
             if element is target:
@@ -698,11 +714,12 @@ class MainWindow(QMainWindow):
     def _build_project_menu(self, index: int) -> QMenu:
         """Menú contextual de la pestaña ``index``."""
         menu = QMenu(self)
-        menu.addAction("Modificar propiedades…", lambda: self.edit_project_properties(index))
-        menu.addAction("Duplicar", lambda: self.duplicate_project(index))
-        menu.addAction("Guardar", lambda: (self.select_project(index), self.save_project_file()))
+        menu.addAction(icons.icon("edit_project"), "Modificar proyecto…", lambda: self.edit_project_properties(index))
+        menu.addAction(icons.icon("duplicate_project"), "Duplicar proyecto", lambda: self.duplicate_project(index))
+        menu.addAction(icons.icon("save_project"), "Guardar proyecto",
+                       lambda: (self.select_project(index), self.save_project_file()))
         menu.addSeparator()
-        menu.addAction("Cerrar", lambda: self.close_project(index))
+        menu.addAction(icons.icon("close_project"), "Cerrar proyecto", lambda: self.close_project(index))
         others = menu.addAction("Cerrar los demás", lambda: self.close_other_projects(index))
         others.setEnabled(len(self.sessions) > 1)
         return menu

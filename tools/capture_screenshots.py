@@ -206,6 +206,46 @@ def capture_interface(out: Path) -> None:
     window.set_dark_mode(False, remember=False)
 
 
+_ICON_LABELS = {
+    "new_project": "Nuevo proyecto", "open_project": "Abrir proyecto", "save_project": "Guardar proyecto",
+    "edit_project": "Modificar proyecto", "duplicate_project": "Duplicar proyecto", "new_element": "Nuevo elemento",
+    "new_bar": "Nueva barra", "edit_bar": "Editar barra", "delete_bar": "Eliminar barra",
+    "export_excel": "Exportar a Excel", "export_pdf": "Exportar a PDF", "detail": "Detalle de barra",
+    "save_as": "Guardar como", "save_all": "Guardar todos", "close_project": "Cerrar proyecto",
+    "edit_element": "Editar elemento", "delete_element": "Eliminar elemento", "sample": "Abrir ejemplo",
+    "catalog": "Catálogo", "bridge": "Puente", "next_project": "Siguiente", "previous_project": "Anterior",
+    "project": "Árbol: proyecto", "group": "Árbol: grupo", "element": "Árbol: elemento",
+}
+
+
+def capture_icons(out: Path) -> None:
+    """Hoja con todos los iconos de la interfaz, en el tema claro y en el nocturno (``docs/iconos.png``)."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
+
+    from gui import icons
+
+    create_application([], dark=False)
+    names = list(_ICON_LABELS)
+    columns, cell_w, cell_h, size = 5, 168, 108, 64
+    rows = -(-len(names) // columns)
+    sheet = QPixmap(columns * cell_w * 2, rows * cell_h)
+    painter = QPainter(sheet)
+    font = QFont()
+    font.setPixelSize(12)
+    painter.setFont(font)
+    for half, dark in enumerate((False, True)):
+        painter.fillRect(half * columns * cell_w, 0, columns * cell_w, rows * cell_h, QColor("#141922" if dark else "#F4F6FA"))
+        painter.setPen(QColor("#E4E8F0" if dark else "#1F2937"))
+        for index, name in enumerate(names):
+            x = half * columns * cell_w + (index % columns) * cell_w
+            y = (index // columns) * cell_h
+            painter.drawPixmap(x + (cell_w - size) // 2, y + 8, icons.render(name, size, dark=dark))
+            painter.drawText(x, y + size + 12, cell_w, 20, Qt.AlignmentFlag.AlignHCenter, _ICON_LABELS[name])
+    painter.end()
+    sheet.save(str(out / "iconos.png"))
+
+
 def _pages(pdf: Path) -> int:
     info = subprocess.run(["pdfinfo", str(pdf)], capture_output=True, text=True, check=True).stdout
     return int(re.search(r"Pages:\s+(\d+)", info).group(1))
@@ -262,5 +302,6 @@ if __name__ == "__main__":
     target = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parent.parent / "docs"
     target.mkdir(parents=True, exist_ok=True)
     capture_interface(target)
+    capture_icons(target)
     capture_exports(target)
     print(f"Capturas escritas en {target}")

@@ -1,16 +1,17 @@
 """Cinta de proyectos: una pestaña por proyecto abierto, con las acciones de proyecto a un clic.
 
-Un clic en una pestaña cambia de proyecto; el botón «Modificar» (o doble clic en la pestaña) abre sus propiedades; la
-«×» de la pestaña lo cierra y el clic derecho ofrece el resto (duplicar, guardar, cerrar los demás).
+Un clic en una pestaña cambia de proyecto; el doble clic abre sus propiedades; la «×» de la pestaña lo cierra y el clic
+derecho ofrece el resto (modificar, duplicar, guardar, cerrar los demás). Nuevo, Abrir, Guardar, Modificar y Duplicar están
+en la barra de herramientas, junto a los demás botones.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
-from PySide6.QtCore import QPoint, QSize, Qt, Signal
+from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QStyle, QTabBar, QToolButton, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QTabBar, QToolButton, QWidget
 
 
 class ProjectTabBar(QTabBar):
@@ -37,13 +38,11 @@ class ProjectTabBar(QTabBar):
 
 
 class ProjectBar(QWidget):
-    """Pestañas de los proyectos abiertos y los botones Nuevo / Modificar / Duplicar."""
+    """Pestañas de los proyectos abiertos."""
 
     selected = Signal(int)
     close_requested = Signal(int)
     edit_requested = Signal(int)
-    duplicate_requested = Signal(int)
-    new_requested = Signal()
     moved = Signal(int, int)
     menu_requested = Signal(int, QPoint)
 
@@ -66,34 +65,11 @@ class ProjectBar(QWidget):
         self.tabs.doubleClicked.connect(self.edit_requested)
         self.tabs.contextRequested.connect(self.menu_requested)
 
-        sp = QStyle.StandardPixmap
-        self.btn_new = self._button("Nuevo", sp.SP_FileIcon, "Crea un proyecto vacío en una pestaña nueva")
-        self.btn_edit = self._button("Modificar", sp.SP_FileDialogDetailedView,
-                                     "Modifica el proyecto seleccionado: nombre, datos de la obra, barra comercial, logo…")
-        self.btn_copy = self._button("Duplicar", sp.SP_FileDialogContentsView,
-                                     "Crea una copia del proyecto seleccionado en una pestaña nueva")
-        self.btn_new.clicked.connect(self.new_requested)
-        self.btn_edit.clicked.connect(lambda *_: self.edit_requested.emit(self.tabs.currentIndex()))
-        self.btn_copy.clicked.connect(lambda *_: self.duplicate_requested.emit(self.tabs.currentIndex()))
-
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
         layout.addWidget(self.label)
         layout.addWidget(self.tabs, stretch=1)
-        for button in (self.btn_new, self.btn_edit, self.btn_copy):
-            layout.addWidget(button)
-
-    def _button(self, text: str, icon: QStyle.StandardPixmap, tip: str) -> QToolButton:
-        button = QToolButton()
-        button.setObjectName("ribbonButton")
-        button.setText(text)
-        button.setIcon(self.style().standardIcon(icon))
-        button.setIconSize(QSize(16, 16))
-        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        button.setToolTip(tip)
-        button.setCursor(Qt.CursorShape.PointingHandCursor)
-        return button
 
     # ------------------------------------------------------------------ contenido
     def set_projects(self, entries: Sequence[tuple[str, str]], current: int) -> None:
