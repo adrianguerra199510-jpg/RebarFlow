@@ -9,19 +9,21 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
-    QApplication, QDockWidget, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QSplitter,
-    QStyle, QTabWidget, QToolBar, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QApplication, QDockWidget, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox, QPushButton,
+    QSplitter, QStyle, QTabWidget, QToolBar, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from core.element import ElementType, StructuralElement
-from core.project import Project
-from core.serialization import FILE_SUFFIX, load_project, save_project
+from core.project import DEFAULT_PROJECT_NAME, Project
+from core.serialization import FILE_SUFFIX, load_project, project_from_dict, project_to_dict, save_project
 from engine.bbs_calculator import BBSCalculator, BBSResult, ScheduleLine
 from exporters.excel_exporter import ExcelExporter
 from exporters.pdf_exporter import PdfExporter
 from gui import style
 from gui.dialogs import BarDialog, ElementDialog, ProjectDialog
 from gui.icon import theme_icon
+from gui.project_bar import ProjectBar
+from gui.session import ProjectSession
 from gui.tables import CuttingPlanTable, ScheduleTable, SummaryView
 from gui.widgets import BarDetailPanel
 from sample_project import build_bridge_project, build_catalog_project, build_project
@@ -30,21 +32,61 @@ _PROJECT_FILTER = f"Proyecto RebarFlow (*{FILE_SUFFIX})"
 
 
 class MainWindow(QMainWindow):
-    """Editor de planillas de despiece."""
+    """Editor de planillas de despiece con varios proyectos abiertos.
+
+    Cada proyecto abierto es una :class:`~gui.session.ProjectSession` y una pestaña de la cinta de proyectos; ``project``,
+    ``path``, ``modified`` y el elemento seleccionado son siempre los del proyecto activo.
+    """
 
     def __init__(self, project: Project | None = None, path: Path | None = None) -> None:
         super().__init__()
-        self.project = project or Project()
-        self.path = path
-        self.modified = False
+        self.sessions: list[ProjectSession] = [ProjectSession(project or Project(), path)]
+        self._index = 0
         self.result: BBSResult | None = None
         self.error: str | None = None
-        self._element: StructuralElement | None = None
 
         self._build_ui()
         self._build_actions()
         self.resize(1520, 900)
         self.refresh()
+
+    # ------------------------------------------------------------------ proyecto activo
+    @property
+    def session(self) -> ProjectSession:
+        """El proyecto activo (el de la pestaña seleccionada de la cinta)."""
+        return self.sessions[self._index]
+
+    @property
+    def project(self) -> Project:
+        return self.session.project
+
+    @project.setter
+    def project(self, value: Project) -> None:
+        self.session.project = value
+
+    @property
+    def path(self) -> Path | None:
+        return self.session.path
+
+    @path.setter
+    def path(self, value: Path | None) -> None:
+        self.session.path = value
+
+    @property
+    def modified(self) -> bool:
+        return self.session.modified
+
+    @modified.setter
+    def modified(self, value: bool) -> None:
+        self.session.modified = value
+
+    @property
+    def _element(self) -> StructuralElement | None:
+        return self.session.element
+
+    @_element.setter
+    def _element(self, value: StructuralElement | None) -> None:
+        self.session.element = value
 
     # ------------------------------------------------------------------ construcción
     def _build_ui(self) -> None:
@@ -127,7 +169,8 @@ class MainWindow(QMainWindow):
 
     def _build_actions(self) -> None:
         sp = QStyle.StandardPixmap
-        self.act_new = self._action("Nuevo", self.new_project, icon=sp.SP_FileIcon, shortcut=QKeySequence.StandardKey.New)
+        self.act_new = self._action("Nuevo", self.new_project, icon=sp.SP_FileIcon, shortcut=QKeySequence.StandardKey.New,
+                                    tip="Crea un proyecto vacío en una pestaña nueva")
         self.act_open = self._action("Abrir…", self.open_project, icon=sp.SP_DialogOpenButton,
                                      shortcut=QKeySequence.StandardKey.Open)
         self.act_sample = self._action("Abrir ejemplo", self.open_sample, icon=sp.SP_DirHomeIcon,
@@ -142,6 +185,14 @@ class MainWindow(QMainWindow):
         self.act_props = self._action("Propiedades del proyecto…", self.edit_project_properties,
                                       icon=sp.SP_FileDialogDetailedView)
         self.act_quit = self._action("Salir", self.close, shortcut=QKeySequence.StandardKey.Quit)
+        self.act_save_all = self._action("Guardar todos", self.save_all, shortcut="Ctrl+Alt+S",
+                                         tip="Guarda todos los proyectos abiertos que tengan cambios")
+        self.act_duplicate = self._action("Duplicar proyecto", self.duplicate_project,
+                                          tip="Crea una copia del proyecto activo en una pestaña nueva")
+        self.act_close_project = self._action("Cerrar proyecto", self.close_project, shortcut="Ctrl+W",
+                                              tip="Cierra el proyecto activo (pregunta si tiene cambios sin guardar)")
+        self.act_next_project = self._action("Proyecto siguiente", lambda: self._step_project(1), shortcut="Ctrl+PgDown")
+        self.act_prev_project = self._action("Proyecto anterior", lambda: self._step_project(-1), shortcut="Ctrl+PgUp")
 
         self.act_add_element = self._action("Nuevo elemento", self.add_element, icon=sp.SP_FileDialogNewFolder,
                                             shortcut="Ctrl+Shift+N")
@@ -175,12 +226,35 @@ class MainWindow(QMainWindow):
             toolbar.addSeparator()
         toolbar.addAction(self.act_detail)
         self.addToolBar(toolbar)
+        self.addToolBarBreak()
+
+        # Cinta de proyectos: una pestaña por proyecto abierto y sus acciones a un clic.
+        self.project_bar = ProjectBar()
+        self.project_bar.selected.connect(self.select_project)
+        self.project_bar.close_requested.connect(self.close_project)
+        self.project_bar.edit_requested.connect(self.edit_project_properties)
+        self.project_bar.duplicate_requested.connect(self.duplicate_project)
+        self.project_bar.new_requested.connect(self.new_project)
+        self.project_bar.moved.connect(self._on_project_moved)
+        self.project_bar.menu_requested.connect(self._project_menu)
+        ribbon = QToolBar("Proyectos")
+        ribbon.setObjectName("projectRibbon")
+        ribbon.setMovable(False)
+        ribbon.setFloatable(False)
+        ribbon.addWidget(self.project_bar)
+        self.addToolBar(ribbon)
+        self.ribbon = ribbon
 
         menu = self.menuBar()
         file_menu = menu.addMenu("&Archivo")
-        for action in (self.act_new, self.act_open, self.act_sample, self.act_bridge, self.act_catalog, None, self.act_save, self.act_save_as, None,
-                       self.act_props, None, self.act_excel, self.act_pdf, None, self.act_quit):
+        for action in (self.act_new, self.act_open, self.act_sample, self.act_bridge, self.act_catalog, None, self.act_save,
+                       self.act_save_as, self.act_save_all, None, self.act_props, None, self.act_excel, self.act_pdf, None,
+                       self.act_quit):
             file_menu.addSeparator() if action is None else file_menu.addAction(action)
+        project_menu = menu.addMenu("&Proyecto")
+        for action in (self.act_new, self.act_props, self.act_duplicate, None, self.act_next_project,
+                       self.act_prev_project, None, self.act_close_project):
+            project_menu.addSeparator() if action is None else project_menu.addAction(action)
         element_menu = menu.addMenu("&Elemento")
         for action in (self.act_add_element, self.act_edit_element, self.act_delete_element):
             element_menu.addAction(action)
@@ -325,8 +399,28 @@ class MainWindow(QMainWindow):
                 f"desperdicio {r.total_waste_pct:.1%}   ·   {len(r.lines)} marcas")
         else:
             self.totals_label.setText("Sin barras")
+        self.project_bar.set_projects([(self._tab_title(i), self._tab_tip(i)) for i in range(len(self.sessions))],
+                                      self._index)
+        self.act_save_all.setEnabled(any(session.modified for session in self.sessions))
+        self.act_next_project.setEnabled(len(self.sessions) > 1)
+        self.act_prev_project.setEnabled(len(self.sessions) > 1)
         marker = "*" if self.modified else ""
         self.setWindowTitle(f"{marker}{self.project.name} — RebarFlow")
+
+    def _tab_title(self, index: int) -> str:
+        """Título de la pestaña: el nombre del proyecto, con «•» si tiene cambios y «(2)» si otro se llama igual."""
+        session = self.sessions[index]
+        name = session.project.name
+        repeated = sum(1 for other in self.sessions[:index] if other.project.name == name)
+        if repeated:
+            name += f" ({repeated + 1})"
+        return f"•  {name}" if session.modified else name
+
+    def _tab_tip(self, index: int) -> str:
+        session = self.sessions[index]
+        place = str(session.path) if session.path else "Sin guardar"
+        changes = " · con cambios sin guardar" if session.modified else ""
+        return f"{session.project.name}\n{place}{changes}\nClic: seleccionar · doble clic: modificar"
 
     def _mark_modified(self) -> None:
         self.modified = True
@@ -465,7 +559,10 @@ class MainWindow(QMainWindow):
             self.delete_group(element, line.group)
 
     # ------------------------------------------------------------------ proyecto y archivos
-    def edit_project_properties(self) -> None:
+    def edit_project_properties(self, index: int | None = None) -> None:
+        """Abre las propiedades del proyecto de la pestaña ``index`` (el activo por omisión)."""
+        if isinstance(index, int) and not isinstance(index, bool) and index != self._index:
+            self.select_project(index)
         dialog = ProjectDialog(self, self.project)
         if dialog.exec():
             dialog.apply_to(self.project)
@@ -480,11 +577,18 @@ class MainWindow(QMainWindow):
         box.exec()
         return box.clickedButton() is yes
 
-    def _confirm_discard(self) -> bool:
-        if not self.modified:
+    def _confirm_discard(self, session: ProjectSession | None = None) -> bool:
+        """Si ``session`` (el proyecto activo por omisión) tiene cambios, pregunta si se guardan o se descartan.
+
+        Devuelve ``False`` si el usuario cancela o no se pudo guardar. El proyecto por el que se pregunta pasa a ser el
+        activo, para que se vea de cuál se trata.
+        """
+        session = session or self.session
+        if not session.modified:
             return True
+        self.select_project(self.sessions.index(session))
         box = QMessageBox(QMessageBox.Icon.Question, "Cambios sin guardar",
-                          f"El proyecto «{self.project.name}» tiene cambios sin guardar. ¿Guardarlos?", parent=self)
+                          f"El proyecto «{session.project.name}» tiene cambios sin guardar. ¿Guardarlos?", parent=self)
         save = box.addButton("Guardar", QMessageBox.ButtonRole.AcceptRole)
         discard = box.addButton("Descartar", QMessageBox.ButtonRole.DestructiveRole)
         box.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
@@ -493,39 +597,155 @@ class MainWindow(QMainWindow):
             return self.save_project_file()
         return box.clickedButton() is discard
 
+    # ------------------------------------------------------------------ varios proyectos
+    def _show_session(self) -> None:
+        """Muestra el proyecto activo: recupera su pestaña central y su elemento seleccionado."""
+        session = self.session
+        self.tabs.setCurrentIndex(session.tab)
+        self.refresh(select=session.element)
+
+    def select_project(self, index: int) -> None:
+        """Cambia al proyecto de la pestaña ``index`` (un clic en la cinta)."""
+        if not 0 <= index < len(self.sessions) or index == self._index:
+            self._update_chrome()
+            return
+        self.session.tab = self.tabs.currentIndex()
+        self._index = index
+        self._show_session()
+
+    def _step_project(self, step: int) -> None:
+        if len(self.sessions) > 1:
+            self.select_project((self._index + step) % len(self.sessions))
+
+    def _unique_name(self, base: str) -> str:
+        names = {session.project.name for session in self.sessions}
+        name, n = base, 1
+        while name in names:
+            n += 1
+            name = f"{base} {n}"
+        return name
+
+    def add_project(self, project: Project, path: Path | None = None, *, modified: bool = False,
+                    reuse_blank: bool = True) -> ProjectSession:
+        """Abre ``project`` en una pestaña nueva y la activa.
+
+        Con ``reuse_blank`` (lo normal al abrir un archivo o un ejemplo) el proyecto activo reemplaza al proyecto vacío
+        sin tocar en vez de dejar una pestaña vacía.
+        """
+        session = ProjectSession(project, path, modified)
+        if reuse_blank and self.session.blank:
+            self.sessions[self._index] = session
+        else:
+            self.session.tab = self.tabs.currentIndex()
+            self.sessions.append(session)
+            self._index = len(self.sessions) - 1
+        self._show_session()
+        return session
+
     def set_project(self, project: Project, path: Path | None = None) -> None:
-        self.project, self.path, self.modified, self._element = project, path, False, None
+        """Reemplaza el contenido del proyecto activo (sin abrir otra pestaña)."""
+        session = self.session
+        session.project, session.path, session.modified, session.element = project, path, False, None
         self.refresh()
 
     def new_project(self) -> None:
-        if self._confirm_discard():
-            self.set_project(Project())
+        self.add_project(Project(name=self._unique_name(DEFAULT_PROJECT_NAME)), reuse_blank=False)
+
+    def duplicate_project(self, index: int | None = None) -> None:
+        """Copia el proyecto de la pestaña ``index`` (el activo por omisión) en una pestaña nueva, sin archivo."""
+        source = self.sessions[self._index if not isinstance(index, int) or isinstance(index, bool) else index].project
+        copy = project_from_dict(project_to_dict(source))
+        copy.name = self._unique_name(f"{source.name} (copia)")
+        self.add_project(copy, modified=True, reuse_blank=False)
+
+    def close_project(self, index: int | None = None) -> bool:
+        """Cierra el proyecto de la pestaña ``index`` (el activo por omisión); falso si el usuario cancela.
+
+        Al cerrar el último queda un proyecto vacío: la ventana siempre tiene un proyecto.
+        """
+        index = self._index if not isinstance(index, int) or isinstance(index, bool) else index
+        session = self.sessions[index]
+        if not self._confirm_discard(session):
+            return False
+        position = self.sessions.index(session)
+        active = self.session
+        del self.sessions[position]
+        if not self.sessions:
+            self.sessions.append(ProjectSession(Project()))
+        if session is active:
+            self._index = min(position, len(self.sessions) - 1)
+        else:
+            self._index = self.sessions.index(active)
+        self._show_session()
+        return True
+
+    def close_other_projects(self, index: int) -> None:
+        keep = self.sessions[index]
+        for session in list(self.sessions):
+            if session is not keep and not self.close_project(self.sessions.index(session)):
+                return
+        self.select_project(self.sessions.index(keep))
+
+    def _on_project_moved(self, source: int, target: int) -> None:
+        """Las pestañas se reordenan arrastrándolas: la lista de proyectos sigue el mismo orden."""
+        active = self.session
+        self.sessions.insert(target, self.sessions.pop(source))
+        self._index = self.sessions.index(active)
+
+    def _project_menu(self, index: int, pos) -> None:
+        self._build_project_menu(index).exec(pos)
+
+    def _build_project_menu(self, index: int) -> QMenu:
+        """Menú contextual de la pestaña ``index``."""
+        menu = QMenu(self)
+        menu.addAction("Modificar propiedades…", lambda: self.edit_project_properties(index))
+        menu.addAction("Duplicar", lambda: self.duplicate_project(index))
+        menu.addAction("Guardar", lambda: (self.select_project(index), self.save_project_file()))
+        menu.addSeparator()
+        menu.addAction("Cerrar", lambda: self.close_project(index))
+        others = menu.addAction("Cerrar los demás", lambda: self.close_other_projects(index))
+        others.setEnabled(len(self.sessions) > 1)
+        return menu
+
+    def save_all(self) -> bool:
+        """Guarda todos los proyectos con cambios; falso si alguno no se guardó."""
+        for session in list(self.sessions):
+            if session.modified:
+                self.select_project(self.sessions.index(session))
+                if not self.save_project_file():
+                    return False
+        return True
 
     def open_sample(self) -> None:
-        if self._confirm_discard():
-            self.set_project(build_project())
+        self.add_project(build_project())
 
     def open_catalog(self) -> None:
-        if self._confirm_discard():
-            self.set_project(build_catalog_project())
+        self.add_project(build_catalog_project())
 
     def open_bridge(self) -> None:
-        if self._confirm_discard():
-            self.set_project(build_bridge_project())
+        self.add_project(build_bridge_project())
 
     def open_path(self, path: Path) -> bool:
+        """Abre un archivo de proyecto en una pestaña nueva; si ya está abierto, solo lo selecciona."""
         try:
-            self.set_project(load_project(path), path)
+            resolved = path.resolve()
+        except OSError:
+            resolved = path
+        for index, session in enumerate(self.sessions):
+            if session.path is not None and session.path.resolve() == resolved:
+                self.select_project(index)
+                return True
+        try:
+            project = load_project(path)
         except (OSError, ValueError, KeyError) as exc:
             QMessageBox.critical(self, "No se pudo abrir el proyecto", f"{path.name}: {exc}")
             return False
+        self.add_project(project, path)
         return True
 
     def open_project(self) -> None:
-        if not self._confirm_discard():
-            return
-        name, _ = QFileDialog.getOpenFileName(self, "Abrir proyecto", "", f"{_PROJECT_FILTER};;Todos los archivos (*)")
-        if name:
+        names, _ = QFileDialog.getOpenFileNames(self, "Abrir proyectos", "", f"{_PROJECT_FILTER};;Todos los archivos (*)")
+        for name in names:
             self.open_path(Path(name))
 
     def write_project(self, path: Path) -> None:
@@ -604,7 +824,8 @@ class MainWindow(QMainWindow):
             "vigente de su proyecto.")
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 (API de Qt)
-        if self._confirm_discard():
+        # Pregunta por cada proyecto con cambios (se va mostrando el que corresponde); cancelar en uno cancela el cierre.
+        if all(self._confirm_discard(session) for session in list(self.sessions) if session.modified):
             event.accept()
         else:
             event.ignore()

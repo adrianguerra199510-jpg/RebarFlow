@@ -23,7 +23,17 @@ _REAL_PREFERENCE = (style.preferred_dark, style.remember_dark)  # las funciones 
 
 @pytest.fixture(scope="session")
 def qapp():
-    return create_application([])
+    app = create_application([])
+    yield app
+    # Al terminar la sesión, destruir los widgets antes que la aplicación evita un cierre abrupto del intérprete.
+    import gc
+
+    app.closeAllWindows()
+    app.processEvents()
+    for widget in app.topLevelWidgets():
+        widget.deleteLater()
+    app.processEvents()
+    gc.collect()
 
 
 @pytest.fixture(autouse=True)
@@ -43,7 +53,8 @@ def _isolate_theme(monkeypatch, qapp):
 def window(qapp):
     win = MainWindow(build_project())
     yield win
-    win.modified = False  # evita el diálogo de cambios sin guardar al cerrar
+    for session in win.sessions:  # evita el diálogo de cambios sin guardar al cerrar
+        session.modified = False
     win.close()
 
 

@@ -263,7 +263,7 @@ class BBSResult:
     def supply_notes(self) -> tuple[tuple[str, str, str], ...]:
         """Marcas armadas con varias barras unidas, como ``(elemento, marca, texto)``: cuántas barras y qué uniones."""
         return tuple(
-            (line.element.name, line.mark, f"{line.supply.notes[0]} → {line.pieces_text}")
+            (line.element.name, line.mark, f"{line.supply.notes[0].removeprefix('Suministro: ')} → {line.pieces_text}")
             for line in self.lines if line.joint_count and line.supply.notes
         )
 

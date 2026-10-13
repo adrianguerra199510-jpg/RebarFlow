@@ -77,7 +77,7 @@ galería con miniatura, y el formulario se genera solo a partir de los parámetr
 | `O` | **Omega (Ω)** | ala, pata, tramo superior, pata y ala |
 | `ET` / `ETR` | **Estribo triangular / trapezoidal** | ángulos internos distintos de 90°; cada pata a 90° o 135° |
 | `AR` | **Aro circular** | traslape y/o ganchos de 90° o 135° en cada extremo; sin ganchos coincide con el código 75 de BS 8666 |
-| `ES` | **Espiral** | vueltas adicionales al inicio y al final por separado, ganchos de 90° o 135° en cada extremo; se suministra en rollo |
+| `ES` | **Espiral** | vueltas adicionales al inicio y al final por separado, ganchos de 90° o 135° en cada extremo; se suministra en **carrete o con barras individuales** (traslape o coupler) |
 | `X` | **Personalizada** | tramos y ángulos definidos a mano |
 
 > Se buscó el catálogo numerado de formas de Revit pero no se pudo consultar (la búsqueda solo devolvió la
@@ -106,6 +106,32 @@ separado (ACI 318 pide 1.5 en cada extremo) y los mismos ganchos. Un archivo gua
 | Estribo con patas distintas | Aro con ganchos | Espiral con vueltas y ganchos |
 |---|---|---|
 | ![Estribo](docs/ui_dialogo_estribo.png) | ![Aro](docs/ui_dialogo_aro.png) | ![Espiral](docs/ui_dialogo_espiral.png) |
+
+### Espiral: carrete o barras individuales
+
+El parámetro **Se suministra en** decide cómo llega la espiral:
+
+* **Carrete (rollo continuo)**, por omisión: un solo alambre, sin uniones. No sale de barras comerciales ni genera retales.
+* **Barras individuales**: la espiral se arma con barras rectas de la longitud comercial del proyecto. Si su desarrollo cabe en una
+  barra es una sola pieza; si es más larga (una espiral de columna suele medir decenas de metros) se elige la **unión**:
+  * **Traslape**: cada unión monta una barra sobre la otra. La longitud del traslape es la de la norma (`48·d`, mínimo 300 mm)
+    o la que se escriba; con `n` barras el acero por espiral crece `(n − 1)` traslapes y ese acero entra en la longitud de corte,
+    el peso y el plan de corte. Un traslape menor que el de la norma se señala con un aviso.
+  * **Coupler** (rosca corta o larga): las barras se unen a tope, el largo no cambia y se cuenta un coupler por unión en el
+    resumen de couplers.
+
+Se cortan tantas barras de longitud comercial completa como quepan y la última lleva el resto (`n = ⌈(L − ℓ)/(S − ℓ)⌉` barras con
+traslape `ℓ` y barra `S`; `⌈L/S⌉` con coupler). El diálogo muestra «4 barras: 3 × 12.00 m + 1.67 m», el panel de detalle las
+lista y las planillas de Excel y PDF añaden la sección *Suministro con uniones*. Las barras entran al plan de corte como
+cualquier otra pieza. Los archivos anteriores se abren como espiral de carrete.
+
+| Espiral con traslapes | Espiral con couplers |
+|---|---|
+| ![Traslape](docs/ui_dialogo_espiral_traslape.png) | ![Coupler](docs/ui_dialogo_espiral_coupler.png) |
+
+> El traslape de `48·d` y 300 mm para refuerzo en espiral (ACI 318-19, 25.7.3.5, barra corrugada sin recubrir) está citado **de
+> memoria** y no se ha contrastado con el texto de la norma: confírmelo con la de su proyecto y use *Longitud del traslape* para
+> fijar otro valor.
 
 ### Obras sin niveles (un puente) y encabezado de la planilla
 
@@ -176,13 +202,21 @@ Los resultados se guardan en caché para no recalcular lo que no cambió.
 El resultado es una **secuencia de corte**: patrones numerados (cuántas barras se cortan igual, de cuál a cuál, en qué orden
 salen las piezas) con la barra dibujada, las marcas a las que sirve cada pieza y el retal de cada barra. Los retales de
 al menos *N* mm (por defecto 1 000, configurable en las propiedades del proyecto) se cuentan como **reutilizables** y el resto
-como desperdicio definitivo. Las espirales se suministran en rollo y no generan retales. Además se compara la longitud
+como desperdicio definitivo. Las espirales de carrete no generan retales; las armadas con barras individuales entran en el plan. Además se compara la longitud
 comercial (6, 9 y 12 m) y se recomienda la que menos acero compra.
 
 ![Plan de corte](docs/ui_plan_corte.png)
 
 ## Interfaz gráfica
 
+* **Varios proyectos a la vez (cinta de proyectos)**: bajo la barra de herramientas hay una pestaña por proyecto abierto. Un clic en una
+  pestaña cambia de proyecto (cada uno recuerda su elemento seleccionado y su pestaña); **Modificar** (o doble clic en la pestaña)
+  abre las propiedades del proyecto —nombre, datos de la obra, barra comercial, logo…—, **Nuevo** crea un proyecto vacío,
+  **Duplicar** hace una copia independiente y la **×** de la pestaña lo cierra (pregunta si tiene cambios sin guardar; un «•» en
+  la pestaña los marca). Las pestañas se reordenan arrastrándolas y el clic derecho ofrece modificar, duplicar, guardar, cerrar y
+  cerrar los demás. *Abrir*, *Abrir ejemplo…* y *Nuevo* abren cada proyecto en una pestaña nueva (un archivo ya abierto solo se
+  selecciona; el proyecto vacío del arranque se reemplaza). Menú *Proyecto*, Ctrl+W (cerrar), Ctrl+PgUp / Ctrl+PgDn (anterior /
+  siguiente) y *Archivo → Guardar todos* (Ctrl+Alt+S). Al salir se pregunta por cada proyecto con cambios.
 * **Árbol del proyecto**: proyecto → estructura / nivel → subestructura → elemento. Los dos niveles de agrupación son
   **opcionales** (un puente no tiene niveles: ver *Obras sin niveles*); el tipo de elemento puede ser viga, columna, zapata, losa, muro u **otros**.
 * **Barras del elemento**: tabla con el dibujo de cada forma, sus cotas y el largo de los ganchos.
@@ -202,6 +236,8 @@ comercial (6, 9 y 12 m) y se recomienda la que menos acero compra.
   Ctrl+Shift+N (elemento), Ctrl+B (barra), Ctrl+E (Excel), Ctrl+P (PDF).
 
 ![Barras de un elemento](docs/ui_barras.png)
+
+![Cinta de proyectos](docs/ui_proyectos.png)
 
 | Planilla del proyecto | Resumen |
 |---|---|
@@ -241,7 +277,8 @@ nombre de la forma y las observaciones no van en la tabla (están en el diálogo
 core/
   geometry.py       GeometryError y fórmulas de doblez (tangente, arco, deducción)
   rebar.py          Rebar, SteelGrade, ganchos estándar, radios de doblez y catálogo #3–#11 y #14
-  cutlength.py      CutLength (desglose del cálculo), HookInfo (largo de cada gancho) y couplers de la barra
+  cutlength.py      CutLength (desglose del cálculo), HookInfo (largo de cada gancho), couplers de la barra y Supply (barras que arman una pieza)
+  splice.py         uniones entre barras comerciales: traslape de norma, reparto en barras con traslape o coupler
   coupler.py        tipos de coupler (rosca corta / larga), rótulos y leyendas
   params.py         parámetros de una forma (tipo, límites, opciones): validación y formularios
   polybar.py        motor: polilínea abierta con ganchos y polígono cerrado con ganchos (longitud y esquema)
@@ -260,7 +297,7 @@ exporters/
   cutting_images.py PNG de cada barra comercial con sus piezas y su retal
   excel_exporter.py libro Excel con esquemas (openpyxl)
   pdf_exporter.py   planilla en PDF con esquemas (reportlab)
-gui/                interfaz PySide6: ventana principal, diálogos, tablas, temas claro y nocturno (style.py)
+gui/                interfaz PySide6: ventana principal, cinta de proyectos (project_bar.py, session.py), diálogos, tablas, temas claro y nocturno (style.py)
 sample_project.py   proyectos de ejemplo (edificio y catálogo de formas)
 main.py             ejemplo por consola
 packaging/          lanzador, .spec de PyInstaller, icono, build_windows.bat y LEEME del .exe
@@ -330,4 +367,5 @@ Para un estribo poligonal cerrado se hereda de `ClosedPolyShape`; para geometrí
 * Los esquemas son proporcionales a las cotas con un tramo mínimo, para que un gancho corto siga legible.
 * El plan de corte usa barras comerciales de una sola longitud por diámetro; la comparación de 6, 9 y 12 m ayuda a elegirla, pero
   no mezcla longitudes en una misma compra.
-* Las piezas se cortan de barras rectas; las espirales se asumen de rollo. No hay traslapes automáticos.
+* Las piezas se cortan de barras rectas; las espirales llegan en carrete o, a elección, se arman con barras individuales unidas con traslape o coupler. Una barra recta o un estribo más largo que la barra comercial no se divide solo: hay que partirlo en marcas traslapadas a mano.
+* La cinta de proyectos no restaura los proyectos abiertos la próxima vez que se inicia la aplicación: cada sesión empieza con un proyecto vacío.

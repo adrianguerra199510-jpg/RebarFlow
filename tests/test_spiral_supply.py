@@ -234,6 +234,6 @@ def test_exports_list_the_marks_built_from_joined_bars(tmp_path):
     assert bbs(Spiral(**BIG)).supply_notes == ()  # el carrete no tiene uniones
     sheet = load_workbook(ExcelExporter().export(result, tmp_path / "p.xlsx")).worksheets[0]
     texts = [str(c.value) for row in sheet.iter_rows() for c in row if c.value is not None]
-    assert "Suministro con uniones" in texts and any("C-1 · marca F1: Suministro: " in t and "× 12.00 m" in t for t in texts)
+    assert "Suministro con uniones" in texts and any(t.startswith("C-1 · marca F1: ") and "traslapes" in t and "× 12.00 m" in t for t in texts)
     pdf = PdfExporter().export(result, tmp_path / "p.pdf")
     assert pdf.stat().st_size > 5_000

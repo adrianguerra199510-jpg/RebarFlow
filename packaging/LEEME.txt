@@ -6,7 +6,12 @@ COMO USARLO
 2. Abra RebarFlow\RebarFlow.exe con doble clic. No requiere instalar Python ni nada mas.
 3. Menu Archivo > "Abrir ejemplo" carga un proyecto de muestra, y "Abrir ejemplo: catalogo de
    formas" muestra una barra de cada plantilla (estribos, aros, espirales, barras #14, etc.).
-4. Exporte la planilla con los botones "Exportar a Excel" y "Exportar a PDF".
+4. Puede tener varios proyectos abiertos a la vez: cada uno es una pestana en la cinta
+   "Proyectos" (bajo la barra de herramientas). Un clic cambia de proyecto; "Modificar" (o
+   doble clic en la pestana) abre sus propiedades; "Nuevo" y "Duplicar" crean otra pestana.
+5. En una espiral puede elegir si llega en carrete o se arma con barras individuales; si es mas
+   larga que la barra comercial se une con traslape o con coupler.
+6. Exporte la planilla con los botones "Exportar a Excel" y "Exportar a PDF".
 
 REQUISITOS
 Windows 10 (version 1809 o superior) o Windows 11, de 64 bits.

@@ -53,8 +53,22 @@ def self_test(folder: Path) -> int:
         window.write_excel(folder / "puente.xlsx")
         window.write_pdf(folder / "puente.pdf")
         report.append(f"puente sin niveles: {len(window.result.lines)} marcas, grupos {list(window.result.levels)}")
-        window.open_catalog()
+        # Varios proyectos: la cinta tiene una pestaña por proyecto abierto y un clic en ella cambia de proyecto.
+        report.append(f"proyectos abiertos: {window.project_bar.titles()}")
+        window.project_bar.tabs.setCurrentIndex(1)
         app.processEvents()
+        if window.project.name != "Catálogo de formas" or len(window.sessions) != 3:
+            raise RuntimeError("la cinta de proyectos no cambió de proyecto")
+        window.duplicate_project()
+        if len(window.sessions) != 4 or not window.project.name.endswith("(copia)"):
+            raise RuntimeError("no se pudo duplicar el proyecto")
+        window.session.modified = False
+        window.close_project()
+        window.select_project(1)
+        app.processEvents()
+        spirals = [line for line in window.result.lines if line.mark in ("ES3", "ES4")]
+        report.append("espirales de barras: " + "; ".join(f"{l.mark} {l.pieces_text} ({l.coupler_text or 'traslapes'})"
+                                                             for l in spirals))
         # Modo nocturno (sin guardar la preferencia): el botón de la esquina superior derecha cambia toda la interfaz.
         window.theme_button.click()
         app.processEvents()

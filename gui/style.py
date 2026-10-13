@@ -116,6 +116,8 @@ QScrollArea > QWidget > QWidget {{ background: {t.panel}; }}
 QToolTip {{ background: {t.panel}; color: {t.text}; border: 1px solid {t.border}; }}
 QLineEdit, QComboBox {{ background: {t.input_bg}; color: {t.text}; border: 1px solid {t.input_border};
     border-radius: 3px; padding: 2px 4px; selection-background-color: {t.selection}; selection-color: {t.selection_text}; }}
+QLineEdit:disabled, QComboBox:disabled {{ color: {t.disabled}; background: {t.window}; }}
+QLabel:disabled {{ color: {t.disabled}; }}
 QComboBox QAbstractItemView {{ background: {t.panel}; color: {t.text}; selection-background-color: {t.selection};
     selection-color: {t.selection_text}; }}
 QLabel {{ color: {t.text}; }}
@@ -126,6 +128,20 @@ QLabel#hint {{ color: {t.muted}; }}
 QLabel#banner {{ background: {t.banner_bg}; color: {t.banner_text}; border: 1px solid {t.banner_border}; padding: 6px 10px; }}
 QLabel#shapePreview {{ background: {t.panel}; border: 1px solid {t.border}; color: {t.muted}; }}
 BarDetailPanel {{ background: {t.panel}; }}
+QToolBar#projectRibbon {{ background: {t.window}; border: 0; border-bottom: 1px solid {t.border}; padding: 6px 8px 0 8px; }}
+QLabel#ribbonLabel {{ color: {t.muted}; font-weight: bold; padding: 0 4px 4px 0; }}
+QTabBar#projectTabs {{ background: transparent; }}
+QTabBar#projectTabs::tab {{ background: {t.tab}; color: {t.text}; border: 1px solid {t.border}; border-bottom: 0;
+    border-top-left-radius: 6px; border-top-right-radius: 6px; padding: 7px 6px 7px 14px; margin-right: 3px;
+    min-width: 110px; max-width: 280px; }}
+QTabBar#projectTabs::tab:hover:!selected {{ background: {t.hover}; }}
+QTabBar#projectTabs::tab:selected {{ background: {t.header}; color: {t.header_text}; border-color: {t.header};
+    font-weight: bold; }}
+QToolButton#tabClose {{ border: 0; border-radius: 9px; color: {t.muted}; font-size: 12pt; font-weight: bold; padding: 0; }}
+QToolButton#tabClose[current="true"] {{ color: {t.header_text}; }}
+QToolButton#tabClose:hover {{ background: {t.red}; color: #FFFFFF; }}
+QToolButton#ribbonButton {{ border: 1px solid {t.border}; background: {t.panel}; padding: 4px 12px 4px 8px; margin-bottom: 4px; }}
+QToolButton#ribbonButton:hover {{ background: {t.hover}; }}
 """
 
 

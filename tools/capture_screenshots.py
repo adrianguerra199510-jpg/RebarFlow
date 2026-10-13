@@ -115,6 +115,24 @@ def capture_interface(out: Path) -> None:
     app.processEvents()
     spiral.grab().save(str(out / "ui_dialogo_espiral.png"))
 
+    # Espiral armada con barras individuales: traslape o coupler cuando excede la barra comercial
+    lapped = BarDialog(window, suggested_mark="ES3")
+    lapped.bar.setCurrentIndex(lapped.bar.findData("#3"))
+    lapped.shape.setCurrentIndex(lapped.shape.findText("ES · Espiral"))
+    lapped._widgets["supply_mode"].setCurrentIndex(lapped._widgets["supply_mode"].findData("bars"))
+    lapped.show()
+    app.processEvents()
+    lapped.grab().save(str(out / "ui_dialogo_espiral_traslape.png"))
+    coupled = BarDialog(window, suggested_mark="ES4")
+    coupled.bar.setCurrentIndex(coupled.bar.findData("#3"))
+    coupled.shape.setCurrentIndex(coupled.shape.findText("ES · Espiral"))
+    coupled._widgets["supply_mode"].setCurrentIndex(coupled._widgets["supply_mode"].findData("bars"))
+    coupled._widgets["joint"].setCurrentIndex(coupled._widgets["joint"].findData("coupler"))
+    coupled._widgets["joint_coupler"].setCurrentIndex(coupled._widgets["joint_coupler"].findData("long"))
+    coupled.show()
+    app.processEvents()
+    coupled.grab().save(str(out / "ui_dialogo_espiral_coupler.png"))
+
     coupler = BarDialog(window, suggested_mark="R3")
     coupler.bar.setCurrentIndex(coupler.bar.findData("#8"))
     coupler.shape.setCurrentIndex(coupler.shape.findText("R · Recta"))
@@ -149,7 +167,15 @@ def capture_interface(out: Path) -> None:
     window.bars_table.selectRow(2)
     app.processEvents()
     window.grab().save(str(out / "ui_puente.png"))
-    window.open_catalog()
+
+    # Varios proyectos abiertos: la cinta de proyectos (un clic en una pestaña cambia de proyecto)
+    window.duplicate_project()
+    window.refresh()
+    app.processEvents()
+    window.grab().save(str(out / "ui_proyectos.png"))
+    window.session.modified = False
+    window.close_project()
+    window.select_project(1)  # vuelve al catálogo
     app.processEvents()
 
     # Propiedades del proyecto: datos del encabezado, logo y nombre del primer grupo
