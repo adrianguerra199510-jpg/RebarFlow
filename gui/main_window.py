@@ -456,11 +456,17 @@ class MainWindow(QMainWindow):
         self._update_chrome()
 
     def _on_bar_selection(self) -> None:
-        line = self.current_line()
+        """Habilita Editar y Eliminar solo con una marca seleccionada: las sub-marcas (``A1.1``) son de solo lectura."""
+        line, part = self.current_line(), self.current_part()
+        editable = line is not None and part is None
         for widget in (self.act_edit_bar, self.act_delete_bar, self.btn_edit_bar, self.btn_delete_bar):
-            widget.setEnabled(line is not None)
+            widget.setEnabled(editable)
+        if part is not None:
+            self.statusBar().showMessage(
+                f"{part.mark} es una sub-marca de {line.mark} y no se edita: para cambiarla, modifique la marca "
+                f"{line.mark}.", 8000)
         if line is not None or self.tabs.currentIndex() == 0:
-            self.detail.show_line(line, self.current_part())
+            self.detail.show_line(line, part)
 
     def _on_project_row_selection(self) -> None:
         rows = self.project_table.selectionModel().selectedRows()
@@ -569,7 +575,7 @@ class MainWindow(QMainWindow):
 
     def edit_bar(self) -> None:
         element, line = self._element, self.current_line()
-        if element is None or line is None:
+        if element is None or line is None or self.current_part() is not None:  # una sub-marca no se edita
             return
         dialog = self._bar_dialog(element, line.group)
         if dialog.exec():
@@ -577,7 +583,7 @@ class MainWindow(QMainWindow):
 
     def delete_bar(self) -> None:
         element, line = self._element, self.current_line()
-        if element is None or line is None:
+        if element is None or line is None or self.current_part() is not None:  # una sub-marca no se elimina
             return
         if self._ask("Eliminar barra", f"¿Eliminar la marca {line.mark} de {element.name}?"):
             self.delete_group(element, line.group)

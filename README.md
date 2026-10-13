@@ -135,7 +135,7 @@ espiral queda `A1.1` (primera), `A1.2` (intermedias ×n) y `A1.3` (última). Una
 En la planilla (interfaz, Excel y PDF) la fila de la marca `A1` conserva su dibujo y sus cotas, y **debajo** van las sub-filas con la barra
 recta, su longitud, la rosca de cada extremo (`RC` / `RL`) y sus propias cantidades y pesos: **los totales salen de las sub-marcas** y no se
 cuentan dos veces. Las sub-marcas entran al plan de corte como `Elemento/A1.2`. En el diálogo y el panel de detalle se ven las sub-marcas
-y, al elegir una sub-fila, el panel muestra esa barra; *Editar* y *Eliminar* sobre una sub-fila actúan sobre la marca completa. Una
+y, al elegir una sub-fila, el panel muestra esa barra. **Las sub-marcas son de solo lectura**: con una sub-fila seleccionada *Editar* y *Eliminar* quedan deshabilitados (también el doble clic y las teclas Intro/Supr) y la barra de estado indica que se cambian modificando la marca `A1`, que es la única que se ajusta. Una
 sub-marca no puede llamarse como otra marca del mismo elemento (el cálculo avisa). Los archivos anteriores se abren sin cambios (la
 espiral como carrete; un parámetro antiguo de «tipo de coupler» pasa a roscas corta + corta o larga + larga).
 

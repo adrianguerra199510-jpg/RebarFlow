@@ -154,6 +154,8 @@ class BarDetailPanel(QFrame):
         ]
         html = f"<table cellspacing='3'>{''.join(rows)}</table>"
         html += f"<p style='color:{theme.muted}'>La marca {escape(line.mark)} se arma con {escape(line.parts_text)}.</p>"
+        html += (f"<p style='color:{theme.muted}'><i>Las sub-marcas son de solo lectura: para cambiarlas, modifique la marca "
+                 f"{escape(line.mark)}.</i></p>")
         html += "".join(f"<p style='color:{theme.muted}'>{escape(note)}</p>" for note in line.supply.notes)
         self.title.setText(f"Marca {escape(part.mark)}  ·  {escape(line.rebar.label)}  ·  {escape(line.rebar.grade.name)}")
         self.preview.set_shape(part.shape, rebar=line.rebar)

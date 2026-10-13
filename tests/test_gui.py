@@ -858,25 +858,41 @@ def test_the_bars_table_lists_the_sub_marks_under_their_mark_with_their_own_numb
     assert table.row_of("A1") == 0 and table.row_of("F1") == 4
 
 
-def test_selecting_a_sub_mark_shows_that_bar_in_the_detail_and_edit_acts_on_the_whole_mark(window, monkeypatch):
+def test_selecting_a_sub_mark_shows_that_bar_in_the_detail_but_it_cannot_be_edited_or_deleted(window, monkeypatch):
     _window_with_split_bars(window)
     window.bars_table.selectRow(2)  # A1.2: la barra intermedia
     assert window.current_part().mark == "A1.2" and window.current_line().mark == "A1"
     title, details = window.detail.title.text(), window.detail.details.text()
     assert "A1.2" in title and "Sub-marca de" in details and "rosca corta al inicio, rosca larga al final" in details
-    assert "A1.1 ×1" in details and "se arma con" in details
+    assert "A1.1 ×1" in details and "se arma con" in details and "solo lectura" in details
     window.bars_table.selectRow(0)
     assert window.current_part() is None and "Sub-marcas" in window.detail.details.text()
-    opened = []
+    assert all(w.isEnabled() for w in (window.act_edit_bar, window.act_delete_bar, window.btn_edit_bar, window.btn_delete_bar))
 
-    def fake_exec(self):
-        opened.append(self.mark.text())
-        return False
-
-    monkeypatch.setattr(BarDialog, "exec", fake_exec)
-    window.bars_table.selectRow(3)  # A1.3
+    opened, asked = [], []
+    monkeypatch.setattr(BarDialog, "exec", lambda self: opened.append(self.mark.text()) and False)
+    monkeypatch.setattr(MainWindow, "_ask", lambda self, title, text: asked.append(title) or True)
+    groups_before = [g.mark for g in window.current_element().groups]
+    for row in (1, 2, 3):  # A1.1, A1.2, A1.3
+        window.bars_table.selectRow(row)
+        assert window.current_part() is not None
+        assert not any(w.isEnabled() for w in (window.act_edit_bar, window.act_delete_bar, window.btn_edit_bar,
+                                               window.btn_delete_bar))
+        assert "sub-marca de A1" in window.statusBar().currentMessage()
+        window.edit_bar()  # ni por el botón, ni por el atajo, ni con doble clic
+        window.delete_bar()
+        window.bars_table.doubleClicked.emit(window.bars_table.model().index(row, 0))
+    assert opened == [] and asked == []
+    assert [g.mark for g in window.current_element().groups] == groups_before  # nada cambió
+    window.bars_table.selectRow(0)  # la marca sí se edita
     window.edit_bar()
-    assert opened == ["A1"] and window.act_edit_bar.isEnabled()  # se edita la marca completa
+    assert opened == ["A1"] and window.act_edit_bar.isEnabled()
+
+
+def test_sub_mark_rows_explain_in_their_tooltip_that_they_are_read_only(window):
+    _window_with_split_bars(window)
+    tooltip = window.bars_table.item(2, 0).toolTip()
+    assert "solo lectura" in tooltip and "modifique la marca A1" in tooltip
 
 
 def test_the_project_table_and_the_summary_show_sub_marks_acopladores_and_roscas(window):

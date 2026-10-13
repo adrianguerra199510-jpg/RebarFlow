@@ -172,7 +172,9 @@ class ScheduleTable(QTableWidget):
         self.setItem(row, col["Peso unit. (kg)"], _item(f"{part.unit_weight_kg:,.2f}", _RIGHT, bg=bg))
         self.setItem(row, col["Long. total (m)"], _item(f"{part.total_length_m:,.2f}", _RIGHT, bg=bg))
         self.setItem(row, col["Peso total (kg)"], _item(f"{part.total_weight_kg:,.2f}", _RIGHT, bold=True, bg=bg))
-        self.item(row, col["Marca"]).setToolTip(f"Sub-marca de {line.mark}: {part.thread_text or 'sin rosca'}")
+        self.item(row, col["Marca"]).setToolTip(
+            f"Sub-marca de {line.mark} ({part.thread_text or 'sin rosca'}). Es de solo lectura: "
+            f"para cambiarla, modifique la marca {line.mark}.")
 
     def _fill_totals(self, row: int, col: dict[str, int], length: float, weight: float, bg: QColor,
                      fg: QColor | None) -> None:
