@@ -20,11 +20,11 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from itertools import groupby
 
-from core.coupler import COUPLER_LONG, COUPLER_NONE, COUPLER_ORDER, COUPLER_SHORT, coupler_count, coupler_text
+from core.coupler import COUPLER_LONG, COUPLER_ORDER, COUPLER_SHORT, coupler_count, coupler_text
 from core.cutlength import BarPart, Supply
 from core.element import RebarGroup, StructuralElement
 from core.rebar import Rebar
-from core.shape_codes import ShapeCode, StraightBar
+from core.shape_codes import ShapeCode
 from core.splice import parts_text, pieces_text
 from engine.cutting_optimizer import CuttingPlan, compare_stock_lengths, optimize_cutting
 
@@ -476,8 +476,7 @@ class BBSCalculator:
             LinePart(
                 mark=sub_mark,
                 part=part,
-                shape=StraightBar(part.length_mm, coupler_start=part.start_thread or COUPLER_NONE,
-                                  coupler_end=part.end_thread or COUPLER_NONE),
+                shape=group.shape.part_shape(group.rebar, part),
                 total_bars=part.count * total_bars,
                 unit_weight_kg=group.rebar.mass_for_length(part.length_mm / 1000.0),
                 total_length_m=part.count * total_bars * part.length_mm / 1000.0,

@@ -35,7 +35,7 @@ from dataclasses import dataclass, fields, replace
 from typing import ClassVar, TypeVar
 
 from core.coupler import COUPLER_CHOICES, COUPLER_NONE  # noqa: F401 (se reexporta)
-from core.cutlength import CutLength, HookInfo, Supply  # noqa: F401 (se reexportan)
+from core.cutlength import BarPart, CutLength, HookInfo, Supply  # noqa: F401 (se reexportan)
 from core.geometry import GeometryError  # noqa: F401
 from core.params import DEFAULT_LENGTH_MM, ParamSpec, param, validate_param  # noqa: F401
 from core.polybar import (  # noqa: F401
@@ -148,6 +148,15 @@ class ShapeCode(ABC):
         varias barras unidas lo sobrescribe.
         """
         return Supply((self.cut_length(rebar).total_mm,), coil=type(self).from_coil)
+
+    def part_shape(self, rebar: Rebar, part: BarPart) -> ShapeCode:
+        """Forma con la que se dibuja la sub-marca ``part`` de una pieza dividida en barras.
+
+        Por defecto, una barra recta del largo de ``part`` con la rosca de cada extremo; una forma cuyas sub-marcas
+        conserven su figura (la espiral) lo sobrescribe.
+        """
+        none = COUPLER_NONE
+        return StraightBar(part.length_mm, coupler_start=part.start_thread or none, coupler_end=part.end_thread or none)
 
     def sketch(self, rebar: Rebar | None = None) -> Sketch:
         """Esquema para planillas e interfaz; con ``rebar`` incluye el largo de los ganchos.

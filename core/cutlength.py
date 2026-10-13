@@ -34,12 +34,17 @@ class BarPart:
             son todas iguales: se agrupan en una sola sub-marca).
         start_thread: Rosca del extremo inicial (``"short"``, ``"long"`` o ``""`` si no la lleva).
         end_thread: Rosca del extremo final.
+        first: Es la primera barra de la pieza y la forma tiene algo propio en su inicio (vueltas planas o gancho de una
+            espiral): no se agrupa con las barras intermedias aunque midan lo mismo.
+        last: Lo mismo para la última barra y el final de la pieza.
     """
 
     length_mm: float
     count: int = 1
     start_thread: str = ""
     end_thread: str = ""
+    first: bool = False
+    last: bool = False
 
     @property
     def threads(self) -> tuple[str, ...]:

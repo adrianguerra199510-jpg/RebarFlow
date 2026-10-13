@@ -31,8 +31,8 @@ import math
 from dataclasses import dataclass, replace
 from typing import ClassVar
 
-from core.coupler import COUPLER_CHOICES
-from core.cutlength import CutLength, Supply
+from core.coupler import COUPLER_CHOICES, COUPLER_CODES
+from core.cutlength import BarPart, CutLength, Supply
 from core.geometry import GeometryError
 from core.params import param
 from core.polybar import (
@@ -69,7 +69,7 @@ from core.shape_codes import (
     migrate_single_hook,
     register_shape,
 )
-from core.sketch import DimLabel, Sketch, dimension_text, format_dimension, proportional
+from core.sketch import Box, DimLabel, Sketch, dimension_text, format_dimension, proportional
 
 
 def _use(style: str) -> BendUse:
@@ -488,6 +488,15 @@ class Spiral(ShapeCode):
                                  auto_text="estándar (48·d, mín. 300 mm)")
     joint_threads: str = param("Roscas de la unión", "choice", THREADS_LONG_SHORT, choices=JOINT_THREAD_CHOICES,
                                depends=(("supply_mode", SUPPLY_BARS), ("joint", JOINT_COUPLER)))
+    # Roscas de los extremos de un tramo de espiral (las de las uniones por acoplador): no se editan, las pone el cálculo
+    # de las sub-marcas para dibujar cada barra con su rosca.
+    coupler_start: str = param("Rosca inicial", "choice", "none", choices=COUPLER_CHOICES, hidden=True)
+    coupler_end: str = param("Rosca final", "choice", "none", choices=COUPLER_CHOICES, hidden=True)
+
+    def validate(self) -> None:
+        for kind, hook, name in ((self.coupler_start, self.hook_start, "inicial"), (self.coupler_end, self.hook_end, "final")):
+            if kind != "none" and hook:
+                raise GeometryError(f"Forma {self.code}: el extremo {name} termina en gancho y no admite rosca para acoplador.")
 
     @classmethod
     def migrate(cls, parameters: dict[str, object]) -> dict[str, object]:
@@ -546,8 +555,40 @@ class Spiral(ShapeCode):
             return Supply((total,), coil=True, notes=("Suministro: carrete (rollo continuo), sin uniones",))
         if total <= stock_length_mm + 1e-6:
             return Supply((total,), notes=("Suministro: una barra individual, sin uniones",))
+        # las vueltas planas y los ganchos son de la primera y la última barra: no se agrupan con las intermedias
+        special = (self.turns_start > 0 or bool(self.hook_start), self.turns_end > 0 or bool(self.hook_end))
         return joined_supply(rebar, total, stock_length_mm, joint=self.joint, lap_mm=self.lap_mm,
-                             threads=self.joint_threads)
+                             threads=self.joint_threads, special_ends=special)
+
+    def part_shape(self, rebar: Rebar, part: BarPart) -> ShapeCode:
+        """Cada sub-marca es también una espiral: un tramo de la misma hélice (mismo Ø y paso, con la altura que da su largo).
+
+        Las vueltas planas y el gancho de cada extremo van solo en la primera y la última barra, y las roscas de la unión
+        en los extremos que corresponden. Es una figura para dibujar (su hélice puede tener menos de una vuelta, y
+        entonces no pasa la validación de una espiral completa); si a la barra solo le caben las vueltas planas o el
+        gancho, no hay hélice y se dibuja recta.
+        """
+        d = rebar.diameter_mm
+        centre = math.pi * (self.diameter - d)
+        spec_start, spec_end = self._specs()
+        try:
+            hooks = hook_allowance(rebar, _round_use(rebar),
+                                   (spec_start if part.first else None, spec_end if part.last else None))
+            turns_start = self.turns_start if part.first else 0.0
+            turns_end = self.turns_end if part.last else 0.0
+            helix = part.length_mm - (turns_start + turns_end) * centre - hooks.arc_mm - hooks.extension_mm
+            turns = helix / math.hypot(centre, self.pitch)
+            if turns <= 1e-9:  # solo caben las vueltas planas o el gancho: no hay hélice que dibujar
+                return super().part_shape(rebar, part)
+            return Spiral(
+                diameter=self.diameter, pitch=self.pitch, height=turns * self.pitch + d,
+                turns_start=turns_start, turns_end=turns_end,
+                hook_start=self.hook_start if part.first else 0, ext_start=self.ext_start if part.first else None,
+                hook_end=self.hook_end if part.last else 0, ext_end=self.ext_end if part.last else None,
+                coupler_start=part.start_thread or "none", coupler_end=part.end_thread or "none",
+            )
+        except GeometryError:
+            return super().part_shape(rebar, part)
 
     def sketch(self, rebar: Rebar | None = None) -> Sketch:
         width, height = proportional([self.diameter, self.height], 0.6)
@@ -590,7 +631,11 @@ class Spiral(ShapeCode):
             if infos[slot] is not None:
                 labels.append(DimLabel(hook_label_text([infos[slot]]), tip,
                                        (-1.0, 0.0) if slot == 0 else (1.0, 0.0), kind="hook"))
-        return Sketch(paths=(tuple(path),), labels=tuple(labels))
+        boxes = tuple(Box(point, heading, kind, COUPLER_CODES[kind])
+                      for kind, point, heading in ((self.coupler_start, (0.0, 0.0), 180.0),
+                                                   (self.coupler_end, (width, height), 0.0))
+                      if kind in COUPLER_CODES)
+        return Sketch(paths=(tuple(path),), labels=tuple(labels), boxes=boxes)
 
 
 # ------------------------------------------------------------------ personalizada

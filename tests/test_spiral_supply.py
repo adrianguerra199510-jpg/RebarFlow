@@ -95,9 +95,20 @@ def test_a_long_spiral_from_bars_is_lapped_by_default_with_the_standard_lap():
     assert joints == math.ceil((total - 609.6) / (STOCK - 609.6) - 1e-9) - 1
     assert supply.material_mm == pytest.approx(total + joints * standard_lap_mm(N4))
     assert supply.threads == () and supply.warnings == () and f"{joints} traslapes de 610 mm" in supply.notes[0]
-    # con traslape las barras no llevan roscas: las completas son una sola sub-marca y el resto, otra
-    assert [(p.length_mm, p.count) for p in supply.parts] == [(STOCK, joints), (pytest.approx(supply.pieces_mm[-1]), 1)]
-    assert [name for name, _ in supply.sub_marks("F1")] == ["F1.1", "F1.2"]
+    # con traslape las barras no llevan roscas, pero la primera (vueltas planas) y la última no son iguales a las intermedias
+    assert [(p.length_mm, p.count) for p in supply.parts] == [(STOCK, 1), (STOCK, joints - 1),
+                                                              (pytest.approx(supply.pieces_mm[-1]), 1)]
+    assert [(p.first, p.last) for p in supply.parts] == [(True, False), (False, False), (False, True)]
+    assert [name for name, _ in supply.sub_marks("F1")] == ["F1.1", "F1.2", "F1.3"]
+
+
+def test_a_spiral_without_flat_turns_or_hooks_groups_all_the_full_bars_in_one_sub_mark():
+    supply = Spiral(**BIG, turns_start=0, turns_end=0, supply_mode="bars").supply(N4, STOCK)
+    joints = len(supply.pieces_mm) - 1
+    assert [(p.length_mm, p.count, p.first, p.last) for p in supply.parts] == [
+        (STOCK, joints, False, False), (pytest.approx(supply.pieces_mm[-1]), 1, False, False)]
+    hooked = Spiral(**BIG, turns_start=0, turns_end=0, hook_end=90, supply_mode="bars").supply(N4, STOCK)
+    assert [(p.count, p.first, p.last) for p in hooked.parts] == [(joints, False, False), (1, False, True)]
 
 
 def test_a_custom_lap_is_used_and_a_short_one_gets_a_warning():
@@ -207,12 +218,12 @@ def test_a_lapped_spiral_weighs_and_counts_the_laps_and_enters_the_cutting_plan_
     assert sum(length * count for length, count in summary.pieces.items()) / 1000 == pytest.approx(line.total_length_m)
     assert summary.pieces[STOCK] == 6 * joints  # barras comerciales completas
     assert summary.coil_length_m == 0 and summary.stock_bars >= 6 * joints + 1
-    assert summary.marks_for(STOCK) == ("C-1/F1.1",) and "C-1/F1.2" in summary.marks_for(line.parts[1].length_mm)
+    assert summary.marks_for(STOCK) == ("C-1/F1.1", "C-1/F1.2") and summary.marks_for(line.parts[2].length_mm) == ("C-1/F1.3",)
     assert line.pieces_text.startswith(f"{joints} × 12.00 m + ")
     # los totales salen de las sub-marcas: suman lo mismo que la marca
     assert sum(p.total_weight_kg for p in line.parts) == pytest.approx(line.total_weight_kg)
     assert sum(p.total_length_m for p in line.parts) == pytest.approx(line.total_length_m)
-    assert [p.total_bars for p in line.parts] == [6 * joints, 6]
+    assert [p.total_bars for p in line.parts] == [6, 6 * (joints - 1), 6]
     assert result.total_weight_kg == pytest.approx(line.total_weight_kg)
 
 
@@ -330,3 +341,80 @@ def test_exports_list_the_sub_marks_as_rows_with_their_own_weights(tmp_path):
     assert "Suministro con uniones" not in texts
     pdf = PdfExporter().export(result, tmp_path / "p.pdf")
     assert pdf.stat().st_size > 5_000
+
+
+# ------------------------------------------------------------------ las sub-marcas de una espiral también son espirales
+def _part_shapes(shape, rebar=N4):
+    result = bbs(shape).lines[0]
+    return result, [part.shape for part in result.parts]
+
+
+def test_the_sub_marks_of_a_spiral_are_spirals_with_the_same_diameter_and_pitch():
+    line, shapes = _part_shapes(Spiral(**BIG, supply_mode="bars", joint="coupler"))
+    assert [type(sh).__name__ for sh in shapes] == ["Spiral"] * 3
+    assert all((sh.diameter, sh.pitch) == (1100.0, 100.0) for sh in shapes)
+    for part, sh in zip(line.parts, shapes):
+        assert sh.cut_length(N4).total_mm == pytest.approx(part.length_mm, abs=0.01)  # la espiral mide lo que la barra
+
+
+def test_flat_turns_and_hooks_go_only_on_the_first_and_last_bars_and_threads_on_the_joint_ends():
+    shape = Spiral(**BIG, turns_start=2.0, turns_end=1.0, hook_start=135, hook_end=90, supply_mode="bars", joint="coupler")
+    _, (first, middle, last) = _part_shapes(shape)
+    assert (first.turns_start, first.turns_end, first.hook_start, first.hook_end) == (2.0, 0.0, 135, 0)
+    assert (middle.turns_start, middle.turns_end, middle.hook_start, middle.hook_end) == (0.0, 0.0, 0, 0)
+    assert (last.turns_start, last.turns_end, last.hook_start, last.hook_end) == (0.0, 1.0, 0, 90)
+    assert (first.coupler_start, first.coupler_end) == ("none", "long")
+    assert (middle.coupler_start, middle.coupler_end) == ("short", "long")
+    assert (last.coupler_start, last.coupler_end) == ("short", "none")
+
+
+def test_the_turns_of_the_sub_marks_add_up_to_the_turns_of_the_spiral():
+    shape = Spiral(**BIG, supply_mode="bars", joint="coupler")
+    line, shapes = _part_shapes(shape)
+    total = sum(sh.turns(N4) * part.count for sh, part in zip(shapes, line.parts))
+    assert total == pytest.approx(shape.turns(N4), abs=0.1 * len(line.supply.pieces_mm))  # + el redondeo de 5 mm por barra
+
+
+def test_a_lapped_spiral_gives_spiral_sub_marks_without_threads():
+    _, shapes = _part_shapes(Spiral(**BIG, supply_mode="bars"))
+    assert [type(sh).__name__ for sh in shapes] == ["Spiral"] * 3
+    assert all((sh.coupler_start, sh.coupler_end) == ("none", "none") for sh in shapes)
+
+
+def test_a_last_bar_with_less_than_a_turn_of_helix_is_still_a_spiral_figure():
+    _, shapes = _part_shapes(Spiral(**BIG, supply_mode="bars"))  # a la última barra le caben 1.5 vueltas planas y 0.7 de hélice
+    last = shapes[-1]
+    assert type(last).__name__ == "Spiral" and last.turns_end == 1.5 and last.turns(N4) < 1.0
+
+
+def test_a_bar_that_only_holds_the_flat_turns_is_drawn_straight():
+    # 12.3 m desarrollados: la última barra mide ~0.3 m, menos que las vueltas planas del final (1.8 m): no hay hélice
+    shape = Spiral(400, 75, 545.0, supply_mode="bars", joint="coupler")
+    assert 12_250 < shape.cut_length(N4).total_mm < 12_450
+    line, shapes = _part_shapes(shape)
+    assert line.parts[-1].length_mm < 450 and type(shapes[-1]).__name__ == "StraightBar"
+    assert (shapes[-1].coupler_start, shapes[-1].coupler_end) == ("short", "none")
+    assert type(shapes[0]).__name__ == "Spiral"
+
+
+def test_the_spiral_sketch_draws_the_thread_boxes_of_a_sub_mark():
+    sketch = Spiral(400, 75, 800, coupler_start="short", coupler_end="long").sketch()
+    assert [(box.kind, box.text) for box in sketch.boxes] == [("short", "RC"), ("long", "RL")]
+    assert Spiral(400, 75, 800).sketch().boxes == ()
+
+
+def test_a_spiral_end_with_a_hook_does_not_accept_a_thread():
+    with pytest.raises(GeometryError, match="gancho"):
+        Spiral(400, 75, 800, hook_start=135, coupler_start="short")
+    Spiral(400, 75, 800, hook_start=135, coupler_end="short")  # el otro extremo sí
+
+
+def test_the_thread_parameters_of_the_spiral_are_not_in_the_form_but_are_saved():
+    hidden = {spec.name for spec in Spiral.parameters() if spec.hidden}
+    assert hidden == {"coupler_start", "coupler_end"}
+    shape = Spiral(400, 75, 800, coupler_start="short", coupler_end="long")
+    project = Project(name="P")
+    element = StructuralElement("C-1", ElementType.COLUMN)
+    element.add_group("F1", N4, shape, 1)
+    project.elements.append(element)
+    assert project_from_dict(project_to_dict(project)).elements[0].groups[0].shape == shape

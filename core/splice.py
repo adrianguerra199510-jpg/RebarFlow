@@ -92,12 +92,15 @@ def pieces_text(pieces_mm: Iterable[float]) -> str:
 
 
 def plan_parts(total_mm: float, stock_mm: float, *, joint: str, lap_mm: float = 0.0,
-               threads: str = THREADS_LONG_SHORT, start_thread: str = "", end_thread: str = "") -> tuple[BarPart, ...]:
+               threads: str = THREADS_LONG_SHORT, start_thread: str = "", end_thread: str = "",
+               special_ends: tuple[bool, bool] = (False, False)) -> tuple[BarPart, ...]:
     """Sub-marcas en las que se divide una pieza de ``total_mm`` con barras de ``stock_mm``.
 
     ``start_thread`` y ``end_thread`` son las roscas propias de la pieza en sus dos puntas (las de una barra recta con
     rosca para otro acoplador); las de las uniones salen de ``threads``. Las barras idénticas se agrupan en una sub-marca:
-    con un acoplador queda la primera, las intermedias (``count`` > 1) y la última.
+    con un acoplador queda la primera, las intermedias (``count`` > 1) y la última. ``special_ends`` indica si el inicio y
+    el final de la pieza tienen algo propio (las vueltas planas y los ganchos de una espiral): entonces la primera o la
+    última barra no se agrupa con las intermedias aunque midan lo mismo.
     """
     if joint == JOINT_COUPLER:
         pieces = coupler_pieces(total_mm, stock_mm)
@@ -106,27 +109,31 @@ def plan_parts(total_mm: float, stock_mm: float, *, joint: str, lap_mm: float = 
         pieces = lap_pieces(total_mm, stock_mm, lap_mm)
         ending = following = ""
     last = len(pieces) - 1
-    grouped: dict[tuple[float, str, str], int] = {}
+    grouped: dict[tuple[float, str, str, bool, bool], int] = {}
     for index, length in enumerate(pieces):
-        bar = (length, start_thread if index == 0 else following, end_thread if index == last else ending)
+        bar = (length, start_thread if index == 0 else following, end_thread if index == last else ending,
+               special_ends[0] and index == 0, special_ends[1] and index == last)
         grouped[bar] = grouped.get(bar, 0) + 1
-    return tuple(BarPart(length, count, start, end) for (length, start, end), count in grouped.items())
+    return tuple(BarPart(length, count, start, end, first, final)
+                 for (length, start, end, first, final), count in grouped.items())
 
 
 def joined_supply(rebar: Rebar, total_mm: float, stock_mm: float, *, joint: str, lap_mm: float | None = None,
-                  threads: str = THREADS_LONG_SHORT, start_thread: str = "", end_thread: str = "") -> Supply:
+                  threads: str = THREADS_LONG_SHORT, start_thread: str = "", end_thread: str = "",
+                  special_ends: tuple[bool, bool] = (False, False)) -> Supply:
     """Barras que arman una pieza de ``total_mm`` mayor que la barra comercial, con sus uniones, notas y avisos."""
     warnings: tuple[str, ...] = ()
     if joint == JOINT_COUPLER:
         parts = plan_parts(total_mm, stock_mm, joint=joint, threads=threads, start_thread=start_thread,
-                           end_thread=end_thread)
+                           end_thread=end_thread, special_ends=special_ends)
         bars = sum(part.count for part in parts)
         notes = (f"Suministro: {bars} barras unidas a tope con {bars - 1} acopladores "
                  f"({_JOINT_THREAD_TEXT[threads]})",)
     else:
         standard = standard_lap_mm(rebar)
         lap = standard if lap_mm is None else lap_mm
-        parts = plan_parts(total_mm, stock_mm, joint=joint, lap_mm=lap, start_thread=start_thread, end_thread=end_thread)
+        parts = plan_parts(total_mm, stock_mm, joint=joint, lap_mm=lap, start_thread=start_thread, end_thread=end_thread,
+                           special_ends=special_ends)
         bars = sum(part.count for part in parts)
         if lap < standard - _EPS:
             warnings = (f"Traslape de {lap:.0f} mm menor que el de norma para espirales "

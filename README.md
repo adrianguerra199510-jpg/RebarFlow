@@ -124,7 +124,13 @@ Se cortan tantas barras de longitud comercial completa como quepan y la última 
 traslape `ℓ` y barra `S`; `⌈L/S⌉` con acoplador). La marca se divide en **sub-marcas**: si la marca es `A1`, las barras salen como
 `A1.1`, `A1.2`… y **las barras idénticas se agrupan** en una sola con su cantidad. Con acoplador de roscas larga + corta, una barra de
 30 m queda `A1.1` (12 m, rosca larga al final), `A1.2` (12 m, rosca corta al inicio y larga al final) y `A1.3` (6 m, rosca corta al
-inicio); con dos barras, solo `A1.1` y `A1.2`. Con traslape, `A1.1` (las barras completas ×n) y `A1.2` (el resto).
+inicio); con dos barras, solo `A1.1` y `A1.2`. Con traslape en una barra recta, `A1.1` (las barras completas ×n) y `A1.2` (el resto).
+
+**Si la marca es una espiral, sus sub-marcas también son espirales**: cada una es un tramo de la misma hélice (mismo diámetro y paso, con la
+altura que le toca por su largo), con las roscas de la unión dibujadas en sus extremos. Las vueltas planas y los ganchos de la espiral van solo
+en la primera y la última barra, así que estas no se agrupan con las intermedias aunque midan lo mismo: con traslape o con acoplador una
+espiral queda `A1.1` (primera), `A1.2` (intermedias ×n) y `A1.3` (última). Una barra a la que solo le caben las vueltas planas o el gancho
+(sin hélice) se dibuja recta.
 
 En la planilla (interfaz, Excel y PDF) la fila de la marca `A1` conserva su dibujo y sus cotas, y **debajo** van las sub-filas con la barra
 recta, su longitud, la rosca de cada extremo (`RC` / `RL`) y sus propias cantidades y pesos: **los totales salen de las sub-marcas** y no se

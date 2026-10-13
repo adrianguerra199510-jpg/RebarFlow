@@ -522,7 +522,7 @@ def test_other_element_type_and_project_remnant_setting(qapp, window):
 def test_open_catalog_example_from_the_menu(window):
     window.open_catalog()
     assert window.project.name == "Catálogo de formas" and not window.modified
-    assert window.bars_table.rowCount() == 35  # 26 marcas + 8 sub-marcas (R4, ES3, ES4) + subtotal
+    assert window.bars_table.rowCount() == 36  # 26 marcas + 9 sub-marcas (R4, ES3, ES4) + subtotal
     pictures = [r for r in range(window.bars_table.rowCount()) if window.bars_table.line_for_row(r)]
     assert all(not window.bars_table.item(r, 2).icon().isNull() for r in pictures)
     assert window.plan_table.rowCount() > 1 and window.act_catalog.text().startswith("Abrir ejemplo")
@@ -892,3 +892,18 @@ def test_the_project_table_and_the_summary_show_sub_marks_acopladores_and_roscas
 
     titles = [label.text() for label in window.summary.findChildren(QLabel)]
     assert any("Acopladores y roscas por barra" in t for t in titles)
+
+
+def test_the_sub_rows_of_a_spiral_draw_spirals_and_the_detail_panel_shows_that_spiral(window):
+    from core.shape_templates import Spiral
+
+    _window_with_split_bars(window)
+    table = window.bars_table
+    spiral_row = table.row_of("F1")
+    assert type(table.line_for_row(spiral_row).shape) is Spiral
+    parts = [table.part_for_row(spiral_row + k) for k in (1, 2, 3)]
+    assert [type(p.shape) for p in parts] == [Spiral, Spiral, Spiral]
+    table.selectRow(spiral_row + 2)  # F1.2: la espiral intermedia
+    details = window.detail.details.text()
+    assert "F1.2" in window.detail.title.text() and "rosca corta al inicio, rosca larga al final" in details
+    assert window.detail.preview.pixmap() is not None and not window.detail.preview.pixmap().isNull()
