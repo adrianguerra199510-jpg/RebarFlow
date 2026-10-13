@@ -38,6 +38,23 @@ def self_test(folder: Path) -> int:
         window.write_excel(folder / "catalogo.xlsx")
         window.write_pdf(folder / "catalogo.pdf")
         report.append(f"catálogo: {len(window.result.lines)} marcas, {window.result.total_weight_kg:.2f} kg")
+        # Obra sin niveles con encabezado y logo (comprueba Pillow y los exportadores con imagen en el ejecutable).
+        from io import BytesIO
+
+        from PIL import Image
+
+        from exporters.logo import normalize_logo
+
+        window.open_bridge()
+        logo = BytesIO()
+        Image.new("RGB", (320, 100), (31, 56, 100)).save(logo, format="PNG")
+        window.project.logo_png = normalize_logo(logo.getvalue())
+        window.refresh()
+        window.write_excel(folder / "puente.xlsx")
+        window.write_pdf(folder / "puente.pdf")
+        report.append(f"puente sin niveles: {len(window.result.lines)} marcas, grupos {list(window.result.levels)}")
+        window.open_catalog()
+        app.processEvents()
         # Modo nocturno (sin guardar la preferencia): el botón de la esquina superior derecha cambia toda la interfaz.
         window.theme_button.click()
         app.processEvents()
@@ -49,7 +66,7 @@ def self_test(folder: Path) -> int:
         report.append(f"modo nocturno: {window.act_theme.text()!r}")
         window.set_dark_mode(False, remember=False)
         for name in ("ventana.png", "planilla.xlsx", "planilla.pdf", "proyecto.rebarflow",
-                     "catalogo.png", "catalogo.xlsx", "catalogo.pdf", "nocturno.png"):
+                     "catalogo.png", "catalogo.xlsx", "catalogo.pdf", "puente.xlsx", "puente.pdf", "nocturno.png"):
             size = (folder / name).stat().st_size
             report.append(f"{name}: {size} bytes")
             if size == 0:

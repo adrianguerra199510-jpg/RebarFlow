@@ -55,30 +55,54 @@ class RebarGroup:
 
 @dataclass
 class StructuralElement:
-    """Elemento estructural (o familia de elementos idénticos) en un nivel.
+    """Elemento estructural (o familia de elementos idénticos), con su ubicación opcional en la obra.
+
+    La ubicación tiene dos niveles de agrupación, ambos opcionales: ``level`` (el primero: un nivel o piso en un
+    edificio, una estructura en un puente) y ``substructure`` (el segundo: p. ej. ``"GENERICA"`` o una pila). Un
+    elemento sin ninguno de los dos se lista directamente bajo el proyecto.
 
     Attributes:
         name: Identificador, p. ej. ``"V-101"``.
         element_type: Viga, columna, zapata, etc.
-        level: Nivel o piso, p. ej. ``"Nivel 1"``.
+        level: Primer nivel de agrupación (p. ej. ``"Nivel 1"`` o ``"C9.6-1"``); vacío si no hay.
         quantity: Número de elementos idénticos; multiplica las barras de cada grupo.
         groups: Grupos de barras que lo arman.
+        substructure: Segundo nivel de agrupación (p. ej. ``"GENERICA"``); vacío si no hay.
     """
 
     name: str
     element_type: ElementType
-    level: str
+    level: str = ""
     quantity: int = 1
     groups: list[RebarGroup] = field(default_factory=list)
+    substructure: str = ""
 
     def __post_init__(self) -> None:
-        if not self.name.strip() or not self.level.strip():
-            raise ValueError("El nombre y el nivel del elemento no pueden estar vacíos.")
+        if not self.name.strip():
+            raise ValueError("El nombre del elemento no puede estar vacío.")
+        self.level = self.level.strip()
+        self.substructure = self.substructure.strip()
         if isinstance(self.quantity, bool) or not isinstance(self.quantity, int) or self.quantity < 1:
             raise ValueError(f"{self.name}: la cantidad de elementos debe ser un entero ≥ 1 (recibido: {self.quantity!r}).")
         marks = [g.mark for g in self.groups]
         if len(marks) != len(set(marks)):
             raise ValueError(f"{self.name}: hay marcas de barra repetidas.")
+
+    @property
+    def path(self) -> tuple[str, ...]:
+        """Ubicación del elemento: sus niveles de agrupación no vacíos, del primero al segundo."""
+        return tuple(part for part in (self.level, self.substructure) if part)
+
+    @property
+    def heading(self) -> str:
+        """Título del elemento en las planillas: ``"V-101  ·  Viga  ·  Nivel 1  ·  4 und"`` (sin ubicación si no tiene)."""
+        parts = [self.name, self.element_type.value, self.location, f"{self.quantity} und"]
+        return "  ·  ".join(part for part in parts if part)
+
+    @property
+    def location(self) -> str:
+        """La ubicación como texto (``"C9.6-1 / GENERICA"``); vacío si el elemento no tiene."""
+        return " / ".join(self.path)
 
     def add_group(
         self, mark: str, rebar: Rebar, shape: ShapeCode, quantity: int, description: str = ""

@@ -34,9 +34,11 @@ def test_workbook_structure_and_totals(result, tmp_path):
     ws = wb["Planilla BBS"]
     headers = [c.value for c in ws[7]]
     assert headers[:3] == ["Marca", "Barra", "Esquema"]
-    assert {"A", "B", "C"} <= set(headers)
-    for removed in ("Ø (mm)", "Forma", "Ganchos (° · mm)", "Observaciones"):
+    # sin diámetro, forma, ganchos, observaciones ni columnas de cotas: las medidas van en el dibujo
+    for removed in ("Ø (mm)", "Forma", "Ganchos (° · mm)", "Observaciones", "A", "B", "C", "D", "E"):
         assert removed not in headers
+    assert headers == ["Marca", "Barra", "Esquema", "Long. corte (mm)", "Cant. por elem.", "Total barras",
+                       "Peso unit. (kg)", "Long. total (m)", "Peso total (kg)"]
     weight_col = headers.index("Peso total (kg)") + 1
 
     total_row = find_row(ws, "TOTAL GENERAL")
@@ -55,7 +57,6 @@ def test_line_values_and_warnings(result, tmp_path):
     row = next(r for r in range(8, ws.max_row + 1) if ws.cell(r, 1).value == "E1")
     assert ws.cell(row, col["Long. corte (mm)"]).value == stirrup.cut_length_mm
     assert ws.cell(row, col["Total barras"]).value == 38 * 4
-    assert ws.cell(row, col["A"]).value == 220 and ws.cell(row, col["B"]).value == 420
 
     # la marca con aviso va en rojo y el texto se lista en un bloque «Avisos» bajo la planilla
     short = next(r for r in range(8, ws.max_row + 1) if ws.cell(r, 1).value == "E2")

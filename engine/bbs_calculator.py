@@ -191,6 +191,7 @@ class BBSResult:
     element_schedules: tuple[ElementSchedule, ...]
     diameter_summaries: tuple[DiameterSummary, ...]
     stock_length_mm: float
+    group_label: str = "Nivel"  # cómo se llama el primer nivel de agrupación de los elementos
 
     @property
     def lines(self) -> tuple[ScheduleLine, ...]:
@@ -251,8 +252,17 @@ class BBSResult:
 
     @property
     def levels(self) -> tuple[str, ...]:
-        """Niveles en orden de aparición."""
+        """Valores del primer nivel de agrupación en orden de aparición (``""`` para los elementos que no lo tienen)."""
         return tuple(dict.fromkeys(schedule.element.level for schedule in self.element_schedules))
+
+    def level_title(self, level: str) -> str:
+        """Rótulo de un grupo para las tablas: su nombre, o «Sin nivel» (según ``group_label``) si no tiene."""
+        return level or f"Sin {self.group_label.lower()}"
+
+    @property
+    def has_level_groups(self) -> bool:
+        """Verdadero si hay al menos dos grupos: solo entonces tiene sentido el consolidado por nivel."""
+        return len(self.levels) >= 2
 
     def weight_by_level_and_diameter(self) -> dict[str, dict[Rebar, float]]:
         """Peso neto (kg) por nivel y barra."""
@@ -290,11 +300,14 @@ class BBSCalculator:
         length_rounding_mm: Paso de redondeo (hacia arriba) de la longitud de corte.
         reusable_remnant_mm: Un retal de al menos esta longitud se considera reutilizable y no desperdicio
             (0 = ningún retal se reutiliza).
+        group_label: Nombre del primer nivel de agrupación de los elementos (``"Nivel"``, ``"Estructura"``…), para los
+            rótulos del consolidado.
     """
 
     stock_length_mm: float = DEFAULT_STOCK_LENGTH_MM
     length_rounding_mm: float = 5.0
     reusable_remnant_mm: float = 1000.0
+    group_label: str = "Nivel"
 
     def __post_init__(self) -> None:
         if self.stock_length_mm <= 0:
@@ -338,7 +351,7 @@ class BBSCalculator:
                     reusable_remnant_mm=self.reusable_remnant_mm,
                 )
             )
-        return BBSResult(schedules, tuple(summaries), self.stock_length_mm)
+        return BBSResult(schedules, tuple(summaries), self.stock_length_mm, self.group_label)
 
     def _build_line(self, element: StructuralElement, group: RebarGroup) -> ScheduleLine:
         cut_mm = round_up_to_step(group.cut_length_mm, self.length_rounding_mm)
@@ -363,8 +376,9 @@ class BBSCalculator:
     def _check_unique(elements: list[StructuralElement]) -> None:
         seen: set[tuple[str, str]] = set()
         for element in elements:
-            key = (element.level, element.name)
+            key = (element.level, element.substructure, element.name)
             if key in seen:
-                raise ValueError(f"El elemento {element.name!r} está repetido en {element.level!r}.")
+                where = f" en {element.location!r}" if element.location else ""
+                raise ValueError(f"El elemento {element.name!r} está repetido{where}.")
             seen.add(key)
 

@@ -36,10 +36,13 @@ def main() -> None:
     args = parser.parse_args()
 
     project = build_project()
-    result = BBSCalculator(project.stock_length_mm, project.length_rounding_mm, project.reusable_remnant_mm).calculate(project.elements)
+    result = BBSCalculator(project.stock_length_mm, project.length_rounding_mm, project.reusable_remnant_mm,
+                           project.group_label).calculate(project.elements)
     print_summary(result)
-    excel = ExcelExporter(project.name, project.author).export(result, args.output)
-    pdf = PdfExporter(project.name, project.author, page_size=project.paper).export(result, args.output.with_suffix(".pdf"))
+    header = dict(info=project.header_fields(), logo_png=project.logo_png)
+    excel = ExcelExporter(project.name, project.author, **header).export(result, args.output)
+    pdf = PdfExporter(project.name, project.author, page_size=project.paper, **header).export(
+        result, args.output.with_suffix(".pdf"))
     print(f"\nPlanillas escritas en {excel} y {pdf}")
 
 

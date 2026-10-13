@@ -31,6 +31,7 @@ from core.coupler import coupler_label, coupler_legend
 from engine.bbs_calculator import BBSResult, ScheduleLine
 from engine.cutting_report import plan_rows, plan_title, stock_comparison
 from exporters.cutting_images import render_pattern_png
+from exporters.logo import fitted_size
 from exporters.shape_images import render_shape_png
 
 _FONT = "Calibri"
@@ -61,9 +62,10 @@ _FMT_MM = "#,##0"
 _FMT_2 = "#,##0.00"
 _FMT_PCT = "0.0%"
 
-# Esquema de la barra: celda de 200 x 75 px (el PNG se genera al doble para que se vea nítido).
-_IMG_W, _IMG_H = 200, 75
-_IMG_ROW_HEIGHT_PT = 62.0
+# Esquema de la barra: celda de 270 x 101 px (las cotas van solo en el dibujo; el PNG se genera al doble para que
+# se vea nítido).
+_IMG_W, _IMG_H = 270, 101
+_IMG_ROW_HEIGHT_PT = 82.0
 # Barra comercial del plan de corte: celda de 400 x 30 px.
 _PLAN_W, _PLAN_H = 400, 30
 _PLAN_ROW_HEIGHT_PT = 27.0
@@ -78,12 +80,16 @@ class ExcelExporter:
         author: Responsable del cálculo (opcional).
         issue_date: Fecha de emisión; por defecto, hoy.
         include_shape_images: Inserta el dibujo de cada forma en la planilla.
+        info: Datos de encabezado adicionales como ``(rótulo, valor)``: cliente, código de obra, plano…
+        logo_png: Logo (PNG) que se coloca arriba a la izquierda de cada hoja; vacío = sin logo.
     """
 
     project_name: str = "Proyecto"
     author: str = ""
     issue_date: date | None = None
     include_shape_images: bool = True
+    info: tuple[tuple[str, str], ...] = ()
+    logo_png: bytes = b""
 
     def export(self, result: BBSResult, path: str | Path) -> Path:
         path = Path(path)
@@ -98,20 +104,16 @@ class ExcelExporter:
     # ------------------------------------------------------------ hoja 1: planilla
     def _write_schedule(self, ws: Worksheet, result: BBSResult) -> None:
         ws.title = "Planilla BBS"
-        dim_labels = result.dimension_labels
         images = self.include_shape_images
         headers = (
             ["Marca", "Barra"]
             + (["Esquema"] if images else [])
-            + dim_labels
             + ["Long. corte (mm)", "Cant. por elem.", "Total barras", "Peso unit. (kg)", "Long. total (m)", "Peso total (kg)"]
         )
         n_cols = len(headers)
         col = {name: i + 1 for i, name in enumerate(headers)}
 
-        self._write_title_block(ws, n_cols, "PLANILLA DE DESPIECE DE ACERO DE REFUERZO (BBS)", result)
-
-        header_row = 7
+        header_row = self._write_title_block(ws, n_cols, "PLANILLA DE DESPIECE DE ACERO DE REFUERZO (BBS)", result) + 3
         for c, text in enumerate(headers, start=1):
             _style(ws.cell(header_row, c, text), _HEADER_FONT, _CENTER, fill=_HEADER_FILL)
         ws.row_dimensions[header_row].height = 32
@@ -119,7 +121,7 @@ class ExcelExporter:
         row = header_row + 1
         for schedule in result.element_schedules:
             element = schedule.element
-            band = f"{element.name}  ·  {element.element_type.value}  ·  {element.level}  ·  {element.quantity} und"
+            band = element.heading
             ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=n_cols)
             _style(ws.cell(row, 1, band), _BOLD, _LEFT, fill=_BAND_FILL)
             for c in range(2, n_cols + 1):
@@ -128,7 +130,7 @@ class ExcelExporter:
 
             first_line = row
             for line in schedule.lines:
-                self._write_line(ws, row, line, col, dim_labels)
+                self._write_line(ws, row, line, col)
                 if images:
                     self._add_shape_image(ws, row, col["Esquema"], line)
                 row += 1
@@ -147,20 +149,18 @@ class ExcelExporter:
             row += 1
         self._write_warnings(ws, row, n_cols, result)
 
-        widths = {"Marca": 9, "Barra": 9, "Esquema": 31, "Long. corte (mm)": 13, "Cant. por elem.": 11,
+        widths = {"Marca": 9, "Barra": 9, "Esquema": 41, "Long. corte (mm)": 13, "Cant. por elem.": 11,
                   "Total barras": 11, "Peso unit. (kg)": 12, "Long. total (m)": 13, "Peso total (kg)": 13}
         for name, c in col.items():
-            ws.column_dimensions[get_column_letter(c)].width = widths.get(name, 10)  # cotas A, B, C…
+            ws.column_dimensions[get_column_letter(c)].width = widths.get(name, 10)
 
         ws.freeze_panes = ws.cell(header_row + 1, 1)
         _page_setup(ws, header_row)
 
-    def _write_line(self, ws: Worksheet, row: int, line: ScheduleLine, col: dict[str, int], dim_labels: list[str]) -> None:
-        dims = line.shape.dimensions()
+    def _write_line(self, ws: Worksheet, row: int, line: ScheduleLine, col: dict[str, int]) -> None:
         values: list[tuple[str, object, str | None, Alignment]] = [
             ("Marca", line.mark, None, _CENTER),
             ("Barra", line.rebar.designation, None, _CENTER),
-            *[(label, dims.get(label), _FMT_MM, _RIGHT) for label in dim_labels],
             ("Long. corte (mm)", line.cut_length_mm, _FMT_MM, _RIGHT),
             ("Cant. por elem.", line.group.quantity, _FMT_MM, _CENTER),
             ("Total barras", line.total_bars, _FMT_MM, _CENTER),
@@ -213,11 +213,12 @@ class ExcelExporter:
     def _write_summary(self, ws: Worksheet, result: BBSResult) -> None:
         n_levels = len(result.levels)
         n_cols = max(11, 2 + n_levels + 1)
-        self._write_title_block(ws, n_cols, "RESUMEN Y CONSOLIDADO DE ACERO DE REFUERZO", result)
-        row = 7
+        row = self._write_title_block(ws, n_cols, "RESUMEN Y CONSOLIDADO DE ACERO DE REFUERZO", result) + 3
+        number = 1
 
         # 1. Peso por diámetro
-        row = self._section(ws, row, "1. Peso neto por diámetro")
+        row = self._section(ws, row, f"{number}. Peso neto por diámetro")
+        number += 1
         row = self._table(
             ws, row,
             ["Barra", "Ø (mm)", "Grado", "Masa (kg/m)", "Total barras", "Long. total (m)", "Peso neto (kg)", "% del total"],
@@ -234,7 +235,7 @@ class ExcelExporter:
         reusable = result.diameter_summaries[0].reusable_remnant_mm if result.diameter_summaries else 0.0
         row = self._section(
             ws, row + 1,
-            f"2. Sobrante de corte (plan optimizado con barras comerciales de {result.stock_length_mm / 1000:.2f} m; "
+            f"{number}. Sobrante de corte (plan optimizado con barras comerciales de {result.stock_length_mm / 1000:.2f} m; "
             + (f"retal reutilizable desde {reusable / 1000:.2f} m)" if reusable > 0 else "sin retales reutilizables)"),
         )
         row = self._table(
@@ -252,31 +253,36 @@ class ExcelExporter:
                    sum(s.reusable_length_m for s in result.diameter_summaries), result.total_scrap_pct],
         )
 
-        # 3. Consolidado por nivel
-        row = self._section(ws, row + 1, "3. Consolidado por nivel (peso neto, kg)")
-        by_level = result.weight_by_level_and_diameter()
-        rebars = [s.rebar for s in result.diameter_summaries]
-        multi_grade = len({r.designation for r in rebars}) != len(rebars)
-        rows = [
-            [f"{rebar.designation} · {rebar.grade.name}" if multi_grade else rebar.designation]
-            + [by_level[level].get(rebar, 0.0) for level in result.levels]
-            + [sum(by_level[level].get(rebar, 0.0) for level in result.levels)]
-            for rebar in rebars
-        ]
-        level_totals = [sum(by_level[level].values()) for level in result.levels]
-        row = self._table(
-            ws, row,
-            ["Barra", *result.levels, "Total"],
-            rows,
-            ["@", *[_FMT_2] * (n_levels + 1)],
-            total=["TOTAL", *level_totals, result.total_weight_kg],
-        )
+        number += 1
+
+        # Consolidado por nivel / estructura (solo si los elementos están repartidos en al menos dos grupos)
+        if result.has_level_groups:
+            row = self._section(ws, row + 1, f"{number}. Consolidado por {result.group_label.lower()} (peso neto, kg)")
+            number += 1
+            by_level = result.weight_by_level_and_diameter()
+            rebars = [s.rebar for s in result.diameter_summaries]
+            multi_grade = len({r.designation for r in rebars}) != len(rebars)
+            rows = [
+                [f"{rebar.designation} · {rebar.grade.name}" if multi_grade else rebar.designation]
+                + [by_level[level].get(rebar, 0.0) for level in result.levels]
+                + [sum(by_level[level].get(rebar, 0.0) for level in result.levels)]
+                for rebar in rebars
+            ]
+            level_totals = [sum(by_level[level].values()) for level in result.levels]
+            row = self._table(
+                ws, row,
+                ["Barra", *[result.level_title(level) for level in result.levels], "Total"],
+                rows,
+                ["@", *[_FMT_2] * (n_levels + 1)],
+                total=["TOTAL", *level_totals, result.total_weight_kg],
+            )
 
         # 4. Longitud comercial recomendada
         comparisons = stock_comparison(result)
         if comparisons:
             lengths = sorted({o.stock_length_mm for c in comparisons for o in c.options})
-            row = self._section(ws, row + 1, "4. Longitud comercial recomendada (barras · sobrante, con el plan optimizado de cada una)")
+            row = self._section(ws, row + 1, f"{number}. Longitud comercial recomendada (barras · sobrante, con el plan optimizado de cada una)")
+            number += 1
             rows = []
             for c in comparisons:
                 by_length = {o.stock_length_mm: o for o in c.options}
@@ -287,10 +293,10 @@ class ExcelExporter:
                               ["@"] * (len(lengths) + 3), total=None)
             n_cols = max(n_cols, len(lengths) + 3)
 
-        # 5. Couplers (solo si alguna barra los lleva)
+        # Couplers (solo si alguna barra los lleva)
         couplers = result.coupler_counts()
         if couplers:
-            row = self._section(ws, row + 1, f"{5 if comparisons else 4}. Couplers por barra y tipo")
+            row = self._section(ws, row + 1, f"{number}. Couplers por barra y tipo")
             self._table(
                 ws, row, ["Barra", "Grado", "Tipo de coupler", "Cantidad"],
                 [[c.rebar.designation, c.rebar.grade.name, coupler_label(c.kind), c.count] for c in couplers],
@@ -307,12 +313,12 @@ class ExcelExporter:
     def _write_plan(self, ws: Worksheet, result: BBSResult) -> None:
         headers = ["Paso", "Barras N°", "Cant.", "Esquema de corte (m)", "Cortes (mm)", "Marcas", "Retal (mm)", "Uso del retal"]
         n_cols = len(headers)
-        self._write_title_block(ws, n_cols, "PLAN Y SECUENCIA DE CORTE", result)
+        last = self._write_title_block(ws, n_cols, "PLAN Y SECUENCIA DE CORTE", result)
         legend = ("Cada barra comercial se corta de izquierda a derecha; el tramo rayado final es el retal "
                   "(verde: reutilizable, gris: desperdicio).")
-        ws.merge_cells(start_row=6, start_column=1, end_row=6, end_column=n_cols)
-        _style(ws.cell(6, 1, legend), _MUTED, Alignment(horizontal="left"))
-        row = 8
+        ws.merge_cells(start_row=last + 2, start_column=1, end_row=last + 2, end_column=n_cols)
+        _style(ws.cell(last + 2, 1, legend), _MUTED, Alignment(horizontal="left"))
+        row = last + 4
         if not result.diameter_summaries:
             ws.cell(row, 1, "Sin barras que cortar.")
         for summary in result.diameter_summaries:
@@ -390,21 +396,43 @@ class ExcelExporter:
         return row
 
     # --------------------------------------------------------------- encabezado
-    def _write_title_block(self, ws: Worksheet, n_cols: int, title: str, result: BBSResult) -> None:
-        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=n_cols)
-        _style(ws.cell(1, 1, title), _TITLE_FONT, Alignment(horizontal="left", vertical="center"))
-        ws.row_dimensions[1].height = 26
+    def _write_title_block(self, ws: Worksheet, n_cols: int, title: str, result: BBSResult) -> int:
+        """Escribe logo, título y datos del encabezado; devuelve la última fila que ocupan."""
+        row = 1
+        if self.logo_png:
+            self._add_logo(ws)
+            row = 2
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=n_cols)
+        _style(ws.cell(row, 1, title), _TITLE_FONT, Alignment(horizontal="left", vertical="center"))
+        ws.row_dimensions[row].height = 26
         issued = (self.issue_date or date.today()).strftime("%d/%m/%Y")
-        info = [
-            ("Proyecto:", self.project_name),
+        extras = [f"{label}: {value}" for label, value in self.info]
+        info = [("Proyecto:", self.project_name)]
+        for k in range(0, len(extras), 3):  # los datos de la obra, de tres en tres por fila
+            info.append(("Datos:" if k == 0 else "", "      ·      ".join(extras[k:k + 3])))
+        info += [
             ("Fecha:", issued + (f"    Responsable: {self.author}" if self.author else "")),
             ("Criterios:", f"Cotas exteriores · ganchos y dobleces según ACI 318 / NSR-10 · "
-                           f"barra comercial {result.stock_length_mm / 1000:.2f} m" + coupler_legend(c.kind for c in result.coupler_counts())),
+                           f"barra comercial {result.stock_length_mm / 1000:.2f} m"
+                           + coupler_legend(c.kind for c in result.coupler_counts())),
         ]
-        for i, (label, text) in enumerate(info, start=2):
-            _style(ws.cell(i, 1, label), _BOLD, Alignment(horizontal="left"))
-            ws.merge_cells(start_row=i, start_column=2, end_row=i, end_column=n_cols)
-            _style(ws.cell(i, 2, text), _MUTED, Alignment(horizontal="left"))
+        for label, text in info:
+            row += 1
+            _style(ws.cell(row, 1, label), _BOLD, Alignment(horizontal="left"))
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=n_cols)
+            _style(ws.cell(row, 2, text), _MUTED, Alignment(horizontal="left"))
+        return row
+
+    def _add_logo(self, ws: Worksheet) -> None:
+        """Logo arriba a la izquierda, en una fila propia sobre el título."""
+        width, height = fitted_size(self.logo_png, 240, 64)
+        ws.row_dimensions[1].height = (height + 6) * 72 / 96
+        image = XLImage(BytesIO(self.logo_png))
+        image.anchor = OneCellAnchor(
+            _from=AnchorMarker(col=0, colOff=pixels_to_EMU(4), row=0, rowOff=pixels_to_EMU(3)),
+            ext=XDRPositiveSize2D(pixels_to_EMU(round(width)), pixels_to_EMU(round(height))),
+        )
+        ws.add_image(image)
 
 
 # --------------------------------------------------------------------- helpers

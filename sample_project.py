@@ -98,3 +98,43 @@ def build_catalog_project() -> Project:
     for mark, rebar, shape, quantity, description in rows:
         element.add_group(mark, rebar, shape, quantity, description)
     return Project(name="Catálogo de formas", author="RebarFlow", elements=[element])
+
+
+def build_bridge_project() -> Project:
+    """Paso inferior de ejemplo: una obra sin niveles, organizada en estructura → subestructura → elemento.
+
+    Muestra la jerarquía opcional (los elementos de una estructura, de una subestructura o sueltos bajo el
+    proyecto) y los datos de encabezado de la planilla (cliente, código de obra, plano, planilla, posición global).
+    """
+    n4, n5, n6, n8 = get_rebar("#4"), get_rebar("#5"), get_rebar("#6"), get_rebar("#8")
+
+    approach = StructuralElement("Losa de transición 1", ElementType.SLAB, "E-1", 2, substructure="GENERICA")
+    approach.add_group("A1", n5, StraightBar(5800), 36, "Refuerzo longitudinal inferior")
+    approach.add_group("A2", n5, StraightBar(6200), 36, "Refuerzo longitudinal superior")
+    approach.add_group("A3", n4, UBar.with_standard_hooks(n4, a=300), 42, "Grapas de unión con el estribo")
+    approach.add_group("A4", n4, Stirrup(1450, 280), 28, "Estribos de borde")
+
+    footing = StructuralElement("Zapata de pila", ElementType.FOOTING, "P-1", 1, substructure="Cimentación")
+    footing.add_group("Z1", n8, UBar.with_standard_hooks(n8, a=3300), 24, "Parrilla inferior X")
+    footing.add_group("Z2", n8, UBar.with_standard_hooks(n8, a=3300), 24, "Parrilla inferior Y")
+    footing.add_group("Z3", n6, StraightBar(3300), 18, "Parrilla superior")
+
+    stem = StructuralElement("Fuste de pila", ElementType.COLUMN, "P-1", 1, substructure="Pila")
+    stem.add_group("F1", n8, StraightBar(6400), 20, "Barras longitudinales")
+    stem.add_group("F2", n4, RingTie(diameter=1100, lap=0, hook_start=135, hook_end=135), 60, "Aros con ganchos a 135°")
+    stem.add_group("F3", n4, Spiral(diameter=1100, pitch=100, height=5600), 1, "Zuncho (se suministra en rollo)")
+
+    cap = StructuralElement("Viga cabezal", ElementType.BEAM, "P-1", 1, substructure="Pila")
+    cap.add_group("C1", n8, StraightBar(8400), 16, "Refuerzo superior")
+    cap.add_group("C2", n8, StraightBar(8400), 16, "Refuerzo inferior")
+    cap.add_group("C3", n4, Stirrup(1500, 1100, hook_start=135, hook_end=90), 70, "Estribos")
+
+    barrier = StructuralElement("Barrera de concreto", ElementType.WALL, quantity=4)  # sin estructura ni subestructura
+    barrier.add_group("B1", n4, StraightBar(5900), 6, "Barras horizontales")
+    barrier.add_group("B2", n4, LBar(a=900, b=300), 20, "Barras de anclaje")
+
+    return Project(
+        name="Paso inferior de ejemplo", author="RebarFlow", elements=[approach, footing, stem, cap, barrier],
+        group_label="Estructura", client="Consorcio de ejemplo", work_code="00001", schedule_number="1.001",
+        drawing="S-101", global_position="1", delivery_date="15/10/2026",
+    )

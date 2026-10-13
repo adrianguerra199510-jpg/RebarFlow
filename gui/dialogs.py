@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Collection
 from html import escape
+from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QFrame, QHBoxLayout, QHeaderView, QLabel,
-    QLineEdit, QPushButton, QSpinBox, QTableWidget, QVBoxLayout, QWidget,
+    QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QHeaderView,
+    QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox, QTableWidget, QVBoxLayout, QWidget,
 )
-
-from PySide6.QtGui import QIcon
 
 from core.element import ElementType, RebarGroup, StructuralElement
 from core.geometry import GeometryError
@@ -21,6 +21,7 @@ from core.project import Project
 from core.rebar import GRADE_40, GRADE_60, GRADE_75, get_rebar, list_rebars
 from core.shape_codes import ShapeCode, available_shapes
 from engine.bbs_calculator import round_up_to_step
+from exporters.logo import LogoError, normalize_logo
 from gui import style
 from gui.widgets import ShapePreview, shape_pixmap
 
@@ -40,23 +41,27 @@ def _buttons(dialog: QDialog) -> QDialogButtonBox:
 
 
 class ElementDialog(QDialog):
-    """Alta y edición de un elemento estructural."""
+    """Alta y edición de un elemento estructural.
+
+    Su ubicación en la obra es opcional y tiene dos niveles de agrupación: el primero se llama como el proyecto lo
+    indique (``group_label``: «Nivel» en un edificio, «Estructura» en un puente) y el segundo es la subestructura. Un
+    elemento sin ninguno de los dos se lista directamente bajo el proyecto.
+    """
 
     def __init__(self, parent: QWidget | None, element: StructuralElement | None = None,
-                 levels: Collection[str] = ()) -> None:
+                 levels: Collection[str] = (), substructures: Collection[str] = (), group_label: str = "Nivel") -> None:
         super().__init__(parent)
         self.setWindowTitle("Editar elemento" if element else "Nuevo elemento")
-        self.setMinimumWidth(380)
+        self.setMinimumWidth(420)
 
         self.name = QLineEdit(element.name if element else "")
         self.name.setPlaceholderText("p. ej. V-101")
         self.type = QComboBox()
         for element_type in ElementType:
             self.type.addItem(element_type.value, element_type)
-        self.level = QComboBox()
-        self.level.setEditable(True)
-        self.level.addItems(list(levels))
-        self.level.setCurrentText(element.level if element else (list(levels)[-1] if levels else "Nivel 1"))
+        self.level = self._group_combo(levels, element.level if element else (list(levels)[-1] if levels else ""),
+                                       f"sin {group_label.lower()}")
+        self.substructure = self._group_combo(substructures, element.substructure if element else "", "sin subestructura")
         self.quantity = QSpinBox()
         self.quantity.setRange(1, 100_000)
         self.quantity.setSuffix(" und")
@@ -67,36 +72,63 @@ class ElementDialog(QDialog):
         form = QFormLayout()
         form.addRow("Nombre:", self.name)
         form.addRow("Tipo:", self.type)
-        form.addRow("Nivel:", self.level)
+        form.addRow(f"{group_label} (opcional):", self.level)
+        form.addRow("Subestructura (opcional):", self.substructure)
         form.addRow("Cantidad de elementos iguales:", self.quantity)
+        hint = QLabel("Si la obra no tiene niveles (un puente, por ejemplo), deje vacío lo que no aplique: el elemento se "
+                      "lista bajo la estructura y la subestructura que indique, o directamente bajo el proyecto.")
+        hint.setObjectName("hint")
+        hint.setWordWrap(True)
         self.buttons = _buttons(self)
         layout = QVBoxLayout(self)
         layout.addLayout(form)
+        layout.addWidget(hint)
         layout.addWidget(self.buttons)
 
         self.name.textChanged.connect(self._validate)
-        self.level.currentTextChanged.connect(self._validate)
         self._validate()
 
-    def _validate(self) -> None:
-        ok = bool(self.name.text().strip() and self.level.currentText().strip())
-        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(ok)
+    @staticmethod
+    def _group_combo(options: Collection[str], current: str, placeholder: str) -> QComboBox:
+        combo = QComboBox()
+        combo.setEditable(True)
+        combo.addItems(list(dict.fromkeys(options)))
+        combo.setCurrentText(current)
+        combo.lineEdit().setPlaceholderText(f"({placeholder})")
+        return combo
 
-    def values(self) -> tuple[str, ElementType, str, int]:
+    def _validate(self) -> None:
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(bool(self.name.text().strip()))
+
+    def values(self) -> tuple[str, ElementType, str, int, str]:
+        """``(nombre, tipo, nivel, cantidad, subestructura)``; nivel y subestructura pueden quedar vacíos."""
         # Qt convierte el valor de un Enum que es ``str`` en texto plano: se recupera el ``ElementType``.
         return (self.name.text().strip(), ElementType(self.type.currentData()), self.level.currentText().strip(),
-                self.quantity.value())
+                self.quantity.value(), self.substructure.currentText().strip())
 
 
 class ProjectDialog(QDialog):
-    """Propiedades del proyecto: encabezado de las planillas y parámetros de cálculo."""
+    """Propiedades del proyecto: datos de encabezado de la planilla, logo, agrupación y parámetros de cálculo."""
 
     def __init__(self, parent: QWidget | None, project: Project) -> None:
         super().__init__(parent)
         self.setWindowTitle("Propiedades del proyecto")
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(520)
+        self._logo = project.logo_png
         self.name = QLineEdit(project.name)
+        self.name.setToolTip("Es la obra: aparece como «Proyecto» en el encabezado de la planilla.")
+        self.client = QLineEdit(project.client)
+        self.work_code = QLineEdit(project.work_code)
+        self.schedule_number = QLineEdit(project.schedule_number)
+        self.drawing = QLineEdit(project.drawing)
+        self.global_position = QLineEdit(project.global_position)
+        self.delivery_date = QLineEdit(project.delivery_date)
+        self.delivery_date.setPlaceholderText("p. ej. 15/10/2026")
         self.author = QLineEdit(project.author)
+        self.group_label = QComboBox()
+        self.group_label.setEditable(True)
+        self.group_label.addItems(["Nivel", "Estructura", "Tramo", "Sector", "Zona"])
+        self.group_label.setCurrentText(project.group_label)
         self.stock = QDoubleSpinBox()
         self.stock.setRange(1000, 24000)
         self.stock.setDecimals(0)
@@ -119,20 +151,95 @@ class ProjectDialog(QDialog):
             self.paper.addItem(text, value)
         self.paper.setCurrentIndex(self.paper.findData(project.paper))
 
-        form = QFormLayout()
-        form.addRow("Nombre del proyecto:", self.name)
-        form.addRow("Responsable:", self.author)
-        form.addRow("Longitud de la barra comercial:", self.stock)
-        form.addRow("Redondeo de la longitud de corte:", self.rounding)
-        form.addRow("Retal reutilizable desde:", self.reusable)
-        form.addRow("Papel del PDF:", self.paper)
+        self.logo_preview = QLabel()
+        self.logo_preview.setObjectName("shapePreview")
+        self.logo_preview.setFixedSize(190, 60)
+        self.logo_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.logo_choose = QPushButton("Elegir logo…")
+        self.logo_clear = QPushButton("Quitar")
+        self.logo_choose.clicked.connect(self._choose_logo)
+        self.logo_clear.clicked.connect(lambda *_: self.set_logo(b""))
+        logo_row = QHBoxLayout()
+        logo_row.addWidget(self.logo_preview)
+        logo_buttons = QVBoxLayout()
+        logo_buttons.addWidget(self.logo_choose)
+        logo_buttons.addWidget(self.logo_clear)
+        logo_buttons.addStretch(1)
+        logo_row.addLayout(logo_buttons)
+        logo_row.addStretch(1)
+
+        def title(text: str) -> QLabel:
+            label = QLabel(text)
+            label.setObjectName("sectionTitle")
+            return label
+
+        header = QFormLayout()
+        header.addRow("Nombre del proyecto (obra):", self.name)
+        header.addRow("Cliente:", self.client)
+        header.addRow("Código de obra:", self.work_code)
+        header.addRow("N° de planilla:", self.schedule_number)
+        header.addRow("Plano:", self.drawing)
+        header.addRow("Posición global:", self.global_position)
+        header.addRow("Fecha de entrega:", self.delivery_date)
+        header.addRow("Responsable:", self.author)
+        header.addRow("Logo:", logo_row)
+        grouping = QFormLayout()
+        grouping.addRow("El primer grupo de elementos se llama:", self.group_label)
+        calc = QFormLayout()
+        calc.addRow("Longitud de la barra comercial:", self.stock)
+        calc.addRow("Redondeo de la longitud de corte:", self.rounding)
+        calc.addRow("Retal reutilizable desde:", self.reusable)
+        calc.addRow("Papel del PDF:", self.paper)
         layout = QVBoxLayout(self)
-        layout.addLayout(form)
+        layout.addWidget(title("Encabezado de la planilla"))
+        layout.addLayout(header)
+        layout.addWidget(title("Agrupación de los elementos"))
+        layout.addLayout(grouping)
+        layout.addWidget(title("Cálculo e impresión"))
+        layout.addLayout(calc)
         layout.addWidget(_buttons(self))
+        self.set_logo(self._logo)
+
+    # ------------------------------------------------------------------ logo
+    def logo(self) -> bytes:
+        """Logo elegido como PNG normalizado (vacío = sin logo)."""
+        return self._logo
+
+    def set_logo(self, png: bytes) -> None:
+        self._logo = png
+        pixmap = QPixmap()
+        if png and pixmap.loadFromData(png):
+            self.logo_preview.setPixmap(pixmap.scaled(self.logo_preview.size() - QSize(8, 8), Qt.AspectRatioMode.KeepAspectRatio,
+                                                      Qt.TransformationMode.SmoothTransformation))
+        else:
+            self.logo_preview.setPixmap(QPixmap())
+            self.logo_preview.setText("sin logo")
+        self.logo_clear.setEnabled(bool(png))
+
+    def load_logo(self, path: Path) -> None:
+        """Lee la imagen de ``path`` y la deja como logo; lanza ``LogoError`` si no es una imagen."""
+        self.set_logo(normalize_logo(Path(path).read_bytes()))
+
+    def _choose_logo(self) -> None:
+        name, _ = QFileDialog.getOpenFileName(self, "Elegir logo", "", "Imágenes (*.png *.jpg *.jpeg *.bmp *.gif *.webp)")
+        if not name:
+            return
+        try:
+            self.load_logo(Path(name))
+        except (LogoError, OSError) as error:
+            QMessageBox.warning(self, "Logo no válido", str(error))
 
     def apply_to(self, project: Project) -> None:
         project.name = self.name.text().strip() or project.name
         project.author = self.author.text().strip()
+        project.client = self.client.text().strip()
+        project.work_code = self.work_code.text().strip()
+        project.schedule_number = self.schedule_number.text().strip()
+        project.drawing = self.drawing.text().strip()
+        project.global_position = self.global_position.text().strip()
+        project.delivery_date = self.delivery_date.text().strip()
+        project.group_label = self.group_label.currentText().strip() or project.group_label
+        project.logo_png = self._logo
         project.stock_length_mm = self.stock.value()
         project.length_rounding_mm = self.rounding.value()
         project.reusable_remnant_mm = self.reusable.value()

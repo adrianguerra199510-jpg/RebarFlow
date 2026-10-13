@@ -7,6 +7,7 @@ respecto de las fórmulas.
 
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import asdict
 from pathlib import Path
@@ -20,6 +21,7 @@ from core.shape_codes import create_shape
 FORMAT = "rebarflow-project"
 VERSION = 1
 FILE_SUFFIX = ".rebarflow"
+_HEADER_KEYS = ("client", "work_code", "drawing", "schedule_number", "delivery_date", "global_position")
 
 
 def project_to_dict(project: Project) -> dict[str, Any]:
@@ -32,11 +34,17 @@ def project_to_dict(project: Project) -> dict[str, Any]:
         "length_rounding_mm": project.length_rounding_mm,
         "reusable_remnant_mm": project.reusable_remnant_mm,
         "paper": project.paper,
+        "group_label": project.group_label,
+        "logo": base64.b64encode(project.logo_png).decode("ascii") if project.logo_png else "",
+        "header": {"client": project.client, "work_code": project.work_code, "drawing": project.drawing,
+                   "schedule_number": project.schedule_number, "delivery_date": project.delivery_date,
+                   "global_position": project.global_position},
         "elements": [
             {
                 "name": element.name,
                 "type": element.element_type.name,
                 "level": element.level,
+                "substructure": element.substructure,
                 "quantity": element.quantity,
                 "groups": [
                     {
@@ -64,7 +72,8 @@ def project_from_dict(data: dict[str, Any]) -> Project:
     try:
         elements = []
         for item in data["elements"]:
-            element = StructuralElement(item["name"], ElementType[item["type"]], item["level"], item["quantity"])
+            element = StructuralElement(item["name"], ElementType[item["type"]], item.get("level", ""), item["quantity"],
+                                        substructure=item.get("substructure", ""))
             for g in item["groups"]:
                 grade = SteelGrade(g["grade"]["name"], g["grade"]["fy_mpa"])
                 shape = create_shape(g["shape"]["code"], **g["shape"]["dimensions"])
@@ -80,6 +89,9 @@ def project_from_dict(data: dict[str, Any]) -> Project:
             reusable_remnant_mm=data.get("reusable_remnant_mm", 1000.0),
             paper=data.get("paper", "letter"),
             elements=elements,
+            group_label=data.get("group_label", "Nivel"),
+            logo_png=base64.b64decode(data["logo"]) if data.get("logo") else b"",
+            **{key: str(value) for key, value in data.get("header", {}).items() if key in _HEADER_KEYS},
         )
     except (KeyError, TypeError) as error:
         raise ValueError(f"Archivo de proyecto dañado o incompleto: {error!r}") from error

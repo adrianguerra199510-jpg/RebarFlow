@@ -107,6 +107,26 @@ separado (ACI 318 pide 1.5 en cada extremo) y los mismos ganchos. Un archivo gua
 |---|---|---|
 | ![Estribo](docs/ui_dialogo_estribo.png) | ![Aro](docs/ui_dialogo_aro.png) | ![Espiral](docs/ui_dialogo_espiral.png) |
 
+### Obras sin niveles (un puente) y encabezado de la planilla
+
+La ubicación de un elemento tiene dos niveles de agrupación, **ambos opcionales**: el primero se llama como usted indique en
+*Propiedades del proyecto → El primer grupo de elementos se llama* (*Nivel* en un edificio, *Estructura* en un puente, *Tramo*,
+*Sector*…) y el segundo es la *subestructura* (p. ej. `GENERICA`, `Pila`, `Cimentación`). El árbol, los títulos de cada tabla
+(`Losa de transición 1 · Losa · E-1 / GENERICA · 2 und`) y la hoja de resumen siguen esa jerarquía; un elemento sin ninguno de
+los dos cuelga directamente del proyecto, y el consolidado por nivel o estructura solo aparece si hay al menos dos grupos.
+*Archivo → Abrir ejemplo: puente (sin niveles)* muestra una obra así.
+
+Las *Propiedades del proyecto* guardan además los datos del encabezado de la planilla, que Excel y PDF imprimen en las primeras
+filas (los vacíos se omiten): **obra** (el nombre del proyecto), **cliente, código de obra, número de planilla, plano,
+posición global y fecha de entrega**, junto al responsable, la fecha y los criterios de cálculo.
+
+![Propiedades del proyecto](docs/ui_dialogo_proyecto.png)
+
+El **logo** se elige con *Elegir logo…* (PNG, JPG, BMP, GIF o WebP): se reduce a un PNG de hasta 640 × 240 px y se guarda **dentro
+del archivo del proyecto**, de modo que viaja con él. Sale arriba a la izquierda de cada hoja del Excel y junto al título del PDF.
+
+![PDF con logo y datos de la obra](docs/export_puente_pdf.png)
+
 ### Largo de los ganchos
 
 Cada gancho se anota con su **ángulo y su extensión recta** (la «pata» después del doblez): en el dibujo, como un rótulo ámbar
@@ -163,12 +183,13 @@ comercial (6, 9 y 12 m) y se recomienda la que menos acero compra.
 
 ## Interfaz gráfica
 
-* **Árbol del proyecto** (nivel → elemento); el tipo de elemento puede ser viga, columna, zapata, losa, muro u **otros**.
+* **Árbol del proyecto**: proyecto → estructura / nivel → subestructura → elemento. Los dos niveles de agrupación son
+  **opcionales** (un puente no tiene niveles: ver *Obras sin niveles*); el tipo de elemento puede ser viga, columna, zapata, losa, muro u **otros**.
 * **Barras del elemento**: tabla con el dibujo de cada forma, sus cotas y el largo de los ganchos.
 * **Diálogo de barra** con vista previa en vivo: muestra el esquema, la longitud de corte (Σ cotas, ajuste por dobleces,
   extensiones), el peso y los errores geométricos; no permite aceptar una barra imposible, con marca repetida o más larga que
   la barra comercial.
-* **Planilla del proyecto**, **Resumen** (peso por diámetro, sobrante, retales reutilizables, consolidado por nivel y longitud
+* **Planilla del proyecto**, **Resumen** (peso por diámetro, sobrante, retales reutilizables, consolidado por nivel o estructura —si hay dos o más— y longitud
   comercial recomendada) y **Plan de corte**.
 * **Modo nocturno**: el botón de la esquina superior derecha (luna / sol; también *Ver → Modo nocturno* o Ctrl+Shift+D) cambia toda
   la interfaz entre el tema claro y uno oscuro: ventana, tablas, diálogos y los esquemas de las barras (trazos claros sobre
@@ -198,9 +219,9 @@ comercial (6, 9 y 12 m) y se recomienda la que menos acero compra.
 
 Cada fila lleva el dibujo de su forma con las cotas, igual que las tablas de armaduras de Revit o de los programas de
 despiece. El mismo renderizador (`exporters/shape_images.py`) alimenta Excel, PDF y la interfaz. Las columnas de la planilla son
-*Marca, Barra, Esquema, cotas (A, B, C…), longitud de corte, cantidad por elemento, total de barras, peso unitario, longitud total y
-peso total*; el diámetro, el nombre de la forma, los ganchos y las observaciones no van en la tabla (están en el dibujo, el diálogo
-y el panel de detalle).
+*Marca, Barra, Esquema, longitud de corte, cantidad por elemento, total de barras, peso unitario, longitud total y peso total*:
+las **cotas, los ganchos y los couplers van solo en el dibujo** (que sale grande para que se lean bien), y el diámetro, el
+nombre de la forma y las observaciones no van en la tabla (están en el diálogo y el panel de detalle).
 
 | Excel (`.xlsx`) | PDF |
 |---|---|
@@ -227,13 +248,13 @@ core/
   sketch.py         esquemas independientes del medio de dibujo (trazos, rótulos con su letra, líneas de cota)
   shape_codes.py    ShapeCode + registro extensible (con migración de códigos antiguos); R, L, U, E
   shape_templates.py  G, EU, Z, Q, O, ET, ETR, AR, ES, X
-  element.py        RebarGroup (marca), StructuralElement (nivel, tipo, cantidad)
+  element.py        RebarGroup (marca), StructuralElement (estructura/nivel y subestructura opcionales, tipo, cantidad)
   project.py        Project: elementos + parámetros de cálculo e impresión
   serialization.py  guardado y carga de proyectos en JSON
 engine/
   cutting_optimizer.py  plan y secuencia de corte (LP, SHP, BFD, FFD) y comparación de longitudes
   cutting_report.py     filas, títulos y comparativo del plan, listos para mostrar
-  bbs_calculator.py     líneas de planilla, pesos por diámetro, plan de corte y consolidado por nivel
+  bbs_calculator.py     líneas de planilla, pesos por diámetro, plan de corte y consolidado por nivel / estructura
 exporters/
   shape_images.py   PNG de cada forma con sus cotas y largos de gancho (Pillow)
   cutting_images.py PNG de cada barra comercial con sus piezas y su retal

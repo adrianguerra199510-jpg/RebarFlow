@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from gui.app import create_application  # noqa: E402
 from gui.dialogs import BarDialog  # noqa: E402
 from gui.main_window import MainWindow  # noqa: E402
-from sample_project import build_catalog_project, build_project  # noqa: E402
+from sample_project import build_bridge_project, build_catalog_project, build_project  # noqa: E402
 
 
 def select_element(window: MainWindow, app, name: str, level: str) -> None:
@@ -141,6 +141,27 @@ def capture_interface(out: Path) -> None:
     app.processEvents()
     window.grab().save(str(out / "ui_catalogo.png"))
 
+    # Obra sin niveles: el paso inferior de ejemplo, agrupado por estructura y subestructura
+    window.open_bridge()
+    window.resize(1700, 1000)
+    window.tabs.setCurrentIndex(0)
+    app.processEvents()
+    window.bars_table.selectRow(2)
+    app.processEvents()
+    window.grab().save(str(out / "ui_puente.png"))
+    window.open_catalog()
+    app.processEvents()
+
+    # Propiedades del proyecto: datos del encabezado, logo y nombre del primer grupo
+    from gui.dialogs import ProjectDialog
+
+    bridge = build_bridge_project()
+    bridge.logo_png = demo_logo()
+    props = ProjectDialog(window, bridge)
+    props.show()
+    app.processEvents()
+    props.grab().save(str(out / "ui_dialogo_proyecto.png"))
+
     # Modo nocturno (sin guardar la preferencia): ventana con el catálogo y diálogo de la espiral
     window.set_dark_mode(True, remember=False)
     window.bars_table.selectRow(window.bars_table.row_of("E3"))
@@ -170,17 +191,35 @@ def _png(pdf: Path, page: int, target: Path, resolution: int = 110) -> None:
                     str(pdf), str(target.with_suffix(""))], check=True)
 
 
+def demo_logo() -> bytes:
+    """Logo de muestra para las capturas: el icono de la aplicación (no se usa ninguna marca ajena)."""
+    from io import BytesIO
+
+    from exporters.logo import normalize_logo
+    from gui.icon import app_icon_image
+
+    buffer = BytesIO()
+    app_icon_image(256).save(buffer, format="PNG")
+    return normalize_logo(buffer.getvalue())
+
+
 def capture_exports(out: Path) -> None:
     from engine.bbs_calculator import BBSCalculator
     from exporters.excel_exporter import ExcelExporter
     from exporters.pdf_exporter import PdfExporter
 
-    for project, prefix in ((build_project(), "export"), (build_catalog_project(), "export_catalogo")):
-        result = BBSCalculator(project.stock_length_mm, project.length_rounding_mm, project.reusable_remnant_mm).calculate(project.elements)
+    bridge = build_bridge_project()
+    bridge.logo_png = demo_logo()
+    for project, prefix in ((build_project(), "export"), (build_catalog_project(), "export_catalogo"),
+                            (bridge, "export_puente")):
+        result = BBSCalculator(project.stock_length_mm, project.length_rounding_mm, project.reusable_remnant_mm,
+                               project.group_label).calculate(project.elements)
         with tempfile.TemporaryDirectory() as tmp:
             tmp_dir = Path(tmp)
-            xlsx = ExcelExporter(project.name, project.author).export(result, tmp_dir / "planilla.xlsx")
-            pdf = PdfExporter(project.name, project.author, page_size=project.paper).export(result, tmp_dir / "planilla_pdf.pdf")
+            xlsx = ExcelExporter(project.name, project.author, info=project.header_fields(),
+                                 logo_png=project.logo_png).export(result, tmp_dir / "planilla.xlsx")
+            pdf = PdfExporter(project.name, project.author, page_size=project.paper, info=project.header_fields(),
+                              logo_png=project.logo_png).export(result, tmp_dir / "planilla_pdf.pdf")
             if shutil.which("soffice") and shutil.which("pdftoppm") and prefix == "export":
                 subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", str(tmp_dir), str(xlsx)],
                                check=True, capture_output=True, timeout=180)

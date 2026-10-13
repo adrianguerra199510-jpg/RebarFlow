@@ -16,7 +16,7 @@ from engine.cutting_report import plan_rows, plan_title, stock_comparison
 from gui import style
 from gui.widgets import pattern_pixmap, shape_pixmap
 
-IMG_W, IMG_H = 176, 66
+IMG_W, IMG_H = 208, 78
 
 _LEFT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 _RIGHT = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
@@ -75,8 +75,8 @@ class ScheduleTable(QTableWidget):
     def row_of(self, mark: str) -> int | None:
         return next((row for row, line in self._lines.items() if line.mark == mark), None)
 
-    def populate(self, schedules: Sequence[ElementSchedule], dim_labels: list[str]) -> None:
-        headers = self.FIXED + dim_labels + self.TAIL
+    def populate(self, schedules: Sequence[ElementSchedule]) -> None:
+        headers = self.FIXED + self.TAIL
         col = {name: i for i, name in enumerate(headers)}
         n_cols = len(headers)
         self.clear()
@@ -91,13 +91,13 @@ class ScheduleTable(QTableWidget):
         for schedule in schedules:
             element = schedule.element
             if self.grouped:
-                band = f"{element.name}  ·  {element.element_type.value}  ·  {element.level}  ·  {element.quantity} und"
+                band = element.heading
                 self.setSpan(row, 0, 1, n_cols)
                 self.setItem(row, 0, _item(band, bold=True, bg=_color("band")))
                 self.setRowHeight(row, 26)
                 row += 1
             for line in schedule.lines:
-                self._fill_line(row, line, col, dim_labels)
+                self._fill_line(row, line, col)
                 self._lines[row] = line
                 row += 1
             self.setSpan(row, 0, 1, col["Total barras"] + 1)
@@ -117,14 +117,13 @@ class ScheduleTable(QTableWidget):
                   "Total barras": 66, "Long. corte (mm)": 92, "Peso unit. (kg)": 84, "Long. total (m)": 88,
                   "Peso total (kg)": 88}
         for name, index in col.items():
-            self.setColumnWidth(index, widths.get(name, 58))  # cotas A, B, C: 58
+            self.setColumnWidth(index, widths.get(name, 58))
         header = self.horizontalHeader()
         header.setStretchLastSection(True)
         header.setMinimumSectionSize(44)
         header.setFixedHeight(42)
 
-    def _fill_line(self, row: int, line: ScheduleLine, col: dict[str, int], dim_labels: list[str]) -> None:
-        dims = line.shape.dimensions()
+    def _fill_line(self, row: int, line: ScheduleLine, col: dict[str, int]) -> None:
         self.setRowHeight(row, IMG_H + 8)
         mark = _item(line.mark, _CENTER, bold=True, fg=_color("red") if line.warnings else None)
         if line.warnings:  # el aviso de norma sale en la marca (en rojo) y en el detalle de la barra
@@ -134,8 +133,6 @@ class ScheduleTable(QTableWidget):
         picture = _item("", _CENTER)
         picture.setIcon(QIcon(shape_pixmap(line.shape, IMG_W, IMG_H, line.rebar)))
         self.setItem(row, col["Esquema"], picture)
-        for label in dim_labels:
-            self.setItem(row, col[label], _item(f"{dims[label]:,.0f}" if label in dims else "", _RIGHT))
         self.setItem(row, col["Cant. por elem."], _item(line.group.quantity, _CENTER))
         self.setItem(row, col["Total barras"], _item(f"{line.total_bars:,}", _CENTER))
         self.setItem(row, col["Long. corte (mm)"], _item(f"{line.cut_length_mm:,.0f}", _RIGHT))
@@ -214,7 +211,8 @@ class SummaryView(QScrollArea):
             layout.addWidget(title)
             layout.addWidget(table)
 
-        section("1. Peso neto por diámetro", _data_table(
+        number = 1
+        section(f"{number}. Peso neto por diámetro", _data_table(
             ["Barra", "Ø (mm)", "Grado", "Masa (kg/m)", "Total barras", "Long. total (m)", "Peso neto (kg)", "% del total"],
             [[s.rebar.designation, f"{s.rebar.diameter_mm:.1f}", s.rebar.grade.name, f"{s.rebar.linear_mass_kg_m:.3f}",
               n(s.total_bars, 0), n(s.total_length_m), n(s.total_weight_kg),
@@ -222,9 +220,10 @@ class SummaryView(QScrollArea):
             ["TOTAL", "", "", "", n(sum(s.total_bars for s in summaries), 0), n(result.total_length_m),
              n(result.total_weight_kg), "100.0%"],
         ))
+        number += 1
         reusable = summaries[0].reusable_remnant_mm
         section(
-            f"2. Sobrante de corte (plan optimizado con barras de {result.stock_length_mm / 1000:.2f} m; "
+            f"{number}. Sobrante de corte (plan optimizado con barras de {result.stock_length_mm / 1000:.2f} m; "
             + (f"retal reutilizable desde {reusable / 1000:.2f} m)" if reusable > 0 else "sin retales reutilizables)"),
             _data_table(
                 ["Barra", "Grado", "Barras comerciales", "Long. comprada (m)", "Long. útil (m)", "Sobrante (m)",
@@ -238,14 +237,17 @@ class SummaryView(QScrollArea):
                  n(sum(s.reusable_length_m for s in summaries)), f"{result.total_scrap_pct:.1%}"],
             ),
         )
-        by_level = result.weight_by_level_and_diameter()
-        multi_grade = len({s.rebar.designation for s in summaries}) != len(summaries)
-        section("3. Consolidado por nivel (peso neto, kg)", _data_table(
-            ["Barra", *result.levels, "Total"],
-            [[f"{s.rebar.designation} · {s.rebar.grade.name}" if multi_grade else s.rebar.designation,
-              *[n(by_level[level].get(s.rebar, 0.0)) for level in result.levels], n(s.total_weight_kg)] for s in summaries],
-            ["TOTAL", *[n(sum(by_level[level].values())) for level in result.levels], n(result.total_weight_kg)],
-        ))
+        number += 1
+        if result.has_level_groups:  # el consolidado por nivel / estructura solo tiene sentido con dos o más grupos
+            by_level = result.weight_by_level_and_diameter()
+            multi_grade = len({s.rebar.designation for s in summaries}) != len(summaries)
+            section(f"{number}. Consolidado por {result.group_label.lower()} (peso neto, kg)", _data_table(
+                ["Barra", *[result.level_title(level) for level in result.levels], "Total"],
+                [[f"{s.rebar.designation} · {s.rebar.grade.name}" if multi_grade else s.rebar.designation,
+                  *[n(by_level[level].get(s.rebar, 0.0)) for level in result.levels], n(s.total_weight_kg)] for s in summaries],
+                ["TOTAL", *[n(sum(by_level[level].values())) for level in result.levels], n(result.total_weight_kg)],
+            ))
+            number += 1
         comparisons = stock_comparison(result)
         if comparisons:
             lengths = sorted({o.stock_length_mm for c in comparisons for o in c.options})
@@ -255,11 +257,12 @@ class SummaryView(QScrollArea):
                 rows.append([c.summary.rebar.designation, c.summary.rebar.grade.name]
                             + [f"{by_length[l].bars} · {by_length[l].waste_pct:.1%}" if l in by_length else "no caben" for l in lengths]
                             + [f"{c.best_mm / 1000:.2f} m" if c.best_mm else "—"])
-            section("4. Longitud comercial recomendada (barras · sobrante, con el plan optimizado de cada una)",
+            section(f"{number}. Longitud comercial recomendada (barras · sobrante, con el plan optimizado de cada una)",
                     _data_table(["Barra", "Grado", *[f"{l / 1000:.2f} m" for l in lengths], "Recomendada"], rows, None))
+            number += 1
         couplers = result.coupler_counts()
         if couplers:
-            section(f"{5 if comparisons else 4}. Couplers por barra y tipo", _data_table(
+            section(f"{number}. Couplers por barra y tipo", _data_table(
                 ["Barra", "Grado", "Tipo de coupler", "Cantidad"],
                 [[c.rebar.designation, c.rebar.grade.name, coupler_label(c.kind), n(c.count, 0)] for c in couplers],
                 ["TOTAL", "", "", n(sum(c.count for c in couplers), 0)],

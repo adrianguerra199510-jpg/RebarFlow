@@ -7,7 +7,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import QSettings, Qt, QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication, QDialogButtonBox  # noqa: E402
 
-from core.element import ElementType  # noqa: E402
+from core.element import ElementType, StructuralElement  # noqa: E402
 from core.rebar import get_rebar  # noqa: E402
 from core.shape_codes import Stirrup  # noqa: E402
 from gui.app import create_application  # noqa: E402
@@ -16,7 +16,7 @@ from gui.dialogs import BarDialog, ElementDialog, LegsEditor, ProjectDialog  # n
 from core.shape_templates import CustomBar, HookedBar  # noqa: E402
 from gui import style  # noqa: E402
 from gui.main_window import MainWindow  # noqa: E402
-from sample_project import build_project  # noqa: E402
+from sample_project import build_bridge_project, build_project  # noqa: E402
 
 _REAL_PREFERENCE = (style.preferred_dark, style.remember_dark)  # las funciones reales, antes de aislarlas en cada prueba
 
@@ -321,7 +321,7 @@ def test_element_dialog(qapp):
     assert ok_enabled(dialog)
     dialog.type.setCurrentIndex(dialog.type.findData(ElementType.FOOTING))
     dialog.quantity.setValue(3)
-    assert dialog.values() == ("V-1", ElementType.FOOTING, "Nivel 2", 3)  # propone el último nivel
+    assert dialog.values() == ("V-1", ElementType.FOOTING, "Nivel 2", 3, "")  # propone el último nivel
 
 
 def test_project_dialog_applies_values(qapp):
@@ -395,8 +395,9 @@ def test_tables_have_no_diameter_shape_hook_or_remark_columns(window):
     for table in (window.bars_table, window.project_table):
         headers = [table.horizontalHeaderItem(c).text().replace("\n", " ") for c in range(table.columnCount())]
         assert headers[:3] == ["Marca", "Barra", "Esquema"]
-        for removed in ("Ø (mm)", "Forma", "Ganchos (° · mm)", "Observaciones"):
+        for removed in ("Ø (mm)", "Forma", "Ganchos (° · mm)", "Observaciones", "A", "B", "C", "D", "E"):
             assert removed not in headers
+        assert len(headers) == 9  # Marca, Barra, Esquema + los seis totales
         assert headers[-1] == "Peso total (kg)"
     # los ganchos siguen en el dibujo (rótulo G) y en el panel de detalle de la barra
     select_element(window, "V-101", "Nivel 1")
@@ -617,3 +618,119 @@ def test_light_is_the_default_even_if_windows_uses_its_dark_theme(qapp, tmp_path
     assert win.act_theme.text() == "Modo nocturno"  # el botón ofrece pasar a nocturno, no al revés
     win.modified = False
     win.close()
+
+
+# ------------------------------------------------------------------ obra sin niveles (puente), encabezado y logo
+def tree_paths(window):
+    paths = []
+
+    def walk(item, prefix):
+        for i in range(item.childCount()):
+            child = item.child(i)
+            paths.append(prefix + (child.text(0),))
+            walk(child, prefix + (child.text(0),))
+
+    walk(window.tree.topLevelItem(0), ())
+    return paths
+
+
+def test_bridge_example_groups_by_structure_and_substructure_without_levels(window):
+    window.open_bridge()
+    assert window.project.name == "Paso inferior de ejemplo" and not window.modified
+    paths = tree_paths(window)
+    assert ("E-1",) in paths and ("E-1", "GENERICA") in paths
+    assert ("E-1", "GENERICA", "Losa de transición 1  ·  Losa  ×2") in paths
+    assert ("P-1", "Pila", "Viga cabezal  ·  Viga  ×1") in paths and ("P-1", "Cimentación", "Zapata de pila  ·  Zapata  ×1") in paths
+    root = window.tree.topLevelItem(0)
+    assert [root.child(i).text(0) for i in range(root.childCount())] == ["E-1", "P-1", "Barrera de concreto  ·  Muro  ×4"]
+    assert root.child(2).childCount() == 0  # el elemento sin estructura cuelga directamente del proyecto
+    assert window.current_element().name == "Losa de transición 1"
+    assert "E-1 / GENERICA" in window.element_title.text()
+    menus = {action.text().replace("&", ""): action.menu() for action in window.menuBar().actions()}
+    assert window.act_bridge in menus["Archivo"].actions()
+
+
+def test_element_without_levels_can_be_added_and_edited(window):
+    window.open_bridge()
+    element = window.add_element_values("Muro de contención", ElementType.WALL)
+    assert element.level == element.substructure == "" and element.location == ""
+    root = window.tree.topLevelItem(0)
+    assert root.child(root.childCount() - 1).text(0).startswith("Muro de contención")
+    window.update_element_values(element, "Muro de contención", ElementType.WALL, "E-2", 3, "Estribo")
+    assert element.path == ("E-2", "Estribo") and element.quantity == 3
+    with pytest.raises(ValueError, match="Ya existe el elemento 'Muro de contención' en 'E-2 / Estribo'"):
+        window.add_element_values("Muro de contención", ElementType.WALL, "E-2", 1, "Estribo")
+    window.add_element_values("Muro de contención", ElementType.WALL, "E-2", 1, "Otro")  # otra subestructura: válido
+    with pytest.raises(ValueError, match="Ya existe el elemento 'Barrera de concreto'."):
+        window.add_element_values("Barrera de concreto", ElementType.WALL)
+
+
+def test_element_dialog_levels_are_optional_and_the_first_group_takes_the_project_name(qapp):
+    dialog = ElementDialog(None, levels=["E-1", "P-1"], substructures=["GENERICA"], group_label="Estructura")
+    assert dialog.level.lineEdit().placeholderText() == "(sin estructura)"
+    assert dialog.substructure.lineEdit().placeholderText() == "(sin subestructura)"
+    assert [dialog.substructure.itemText(i) for i in range(dialog.substructure.count())] == ["GENERICA"]
+    assert not ok_enabled(dialog)  # falta el nombre
+    dialog.name.setText("Barrera")
+    dialog.level.setCurrentText("")
+    assert ok_enabled(dialog)  # sin nivel ni subestructura es válido
+    assert dialog.values() == ("Barrera", ElementType("Viga"), "", 1, "")
+    dialog.level.setCurrentText("P-1")
+    dialog.substructure.setCurrentText("Pila")
+    assert dialog.values()[2:] == ("P-1", 1, "Pila")
+    existing = ElementDialog(None, StructuralElement("X", ElementType.SLAB, "E-1", 2, substructure="GENERICA"))
+    assert existing.level.currentText() == "E-1" and existing.substructure.currentText() == "GENERICA"
+
+
+def test_project_dialog_edits_header_data_group_label_and_logo(qapp, tmp_path):
+    from exporters.logo import LogoError
+
+    project = build_bridge_project()
+    dialog = ProjectDialog(None, project)
+    assert dialog.client.text() == "Consorcio de ejemplo" and dialog.group_label.currentText() == "Estructura"
+    assert dialog.logo() == b"" and not dialog.logo_clear.isEnabled()
+    dialog.client.setText("Otro cliente")
+    dialog.work_code.setText("12345")
+    dialog.group_label.setCurrentText("Tramo")
+    png = tmp_path / "logo.png"
+    from PIL import Image
+
+    Image.new("RGB", (800, 300), (10, 90, 100)).save(png)
+    dialog.load_logo(png)
+    assert dialog.logo().startswith(b"\x89PNG") and dialog.logo_clear.isEnabled() and not dialog.logo_preview.pixmap().isNull()
+    dialog.apply_to(project)
+    assert (project.client, project.work_code, project.group_label) == ("Otro cliente", "12345", "Tramo")
+    assert project.logo_png == dialog.logo()
+    bad = tmp_path / "no_es_imagen.png"
+    bad.write_bytes(b"texto")
+    with pytest.raises(LogoError):
+        dialog.load_logo(bad)
+    assert project.logo_png == dialog.logo()  # un archivo no válido no cambia el logo
+    dialog.logo_clear.click()
+    assert dialog.logo() == b"" and dialog.logo_preview.text() == "sin logo"
+
+
+def test_window_exports_carry_the_header_data_and_logo(window, tmp_path):
+    from openpyxl import load_workbook
+
+    from exporters.logo import normalize_logo
+
+    window.open_bridge()
+    window.project.logo_png = normalize_logo(_png_bytes())
+    sheet = load_workbook(window.write_excel(tmp_path / "p.xlsx"))["Planilla BBS"]
+    texts = [str(sheet.cell(r, 2).value) for r in range(1, 12)]
+    assert any("Cliente: Consorcio de ejemplo" in t and "Cód. obra: 00001" in t for t in texts)
+    assert any(image.anchor._from.row == 0 for image in sheet._images)  # el logo, arriba a la izquierda
+    window.project.group_label = "Tramo"
+    window.refresh()
+    assert window.result.group_label == "Tramo" and window.result.level_title("") == "Sin tramo"
+
+
+def _png_bytes() -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+
+    buffer = BytesIO()
+    Image.new("RGB", (300, 100), (20, 100, 110)).save(buffer, format="PNG")
+    return buffer.getvalue()

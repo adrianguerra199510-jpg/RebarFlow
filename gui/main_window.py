@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from html import escape
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -15,7 +16,7 @@ from PySide6.QtWidgets import (
 from core.element import ElementType, StructuralElement
 from core.project import Project
 from core.serialization import FILE_SUFFIX, load_project, save_project
-from engine.bbs_calculator import BBSCalculator, BBSResult, ScheduleLine, dimension_labels
+from engine.bbs_calculator import BBSCalculator, BBSResult, ScheduleLine
 from exporters.excel_exporter import ExcelExporter
 from exporters.pdf_exporter import PdfExporter
 from gui import style
@@ -23,7 +24,7 @@ from gui.dialogs import BarDialog, ElementDialog, ProjectDialog
 from gui.icon import theme_icon
 from gui.tables import CuttingPlanTable, ScheduleTable, SummaryView
 from gui.widgets import BarDetailPanel
-from sample_project import build_catalog_project, build_project
+from sample_project import build_bridge_project, build_catalog_project, build_project
 
 _PROJECT_FILTER = f"Proyecto RebarFlow (*{FILE_SUFFIX})"
 
@@ -133,6 +134,8 @@ class MainWindow(QMainWindow):
                                        tip="Carga un proyecto de ejemplo (cimentación y 2 niveles)")
         self.act_catalog = self._action("Abrir ejemplo: catálogo de formas", self.open_catalog,
                                         tip="Carga un proyecto con una barra de cada plantilla de forma")
+        self.act_bridge = self._action("Abrir ejemplo: puente (sin niveles)", self.open_bridge,
+                                       tip="Carga un proyecto organizado por estructura y subestructura, sin niveles")
         self.act_save = self._action("Guardar", self.save_project_file, icon=sp.SP_DialogSaveButton,
                                      shortcut=QKeySequence.StandardKey.Save)
         self.act_save_as = self._action("Guardar como…", self.save_project_as, shortcut=QKeySequence.StandardKey.SaveAs)
@@ -175,7 +178,7 @@ class MainWindow(QMainWindow):
 
         menu = self.menuBar()
         file_menu = menu.addMenu("&Archivo")
-        for action in (self.act_new, self.act_open, self.act_sample, self.act_catalog, None, self.act_save, self.act_save_as, None,
+        for action in (self.act_new, self.act_open, self.act_sample, self.act_bridge, self.act_catalog, None, self.act_save, self.act_save_as, None,
                        self.act_props, None, self.act_excel, self.act_pdf, None, self.act_quit):
             file_menu.addSeparator() if action is None else file_menu.addAction(action)
         element_menu = menu.addMenu("&Elemento")
@@ -238,7 +241,7 @@ class MainWindow(QMainWindow):
         target = select or self._element
         try:
             self.result = BBSCalculator(self.project.stock_length_mm, self.project.length_rounding_mm,
-                          self.project.reusable_remnant_mm).calculate(
+                          self.project.reusable_remnant_mm, self.project.group_label).calculate(
                 self.project.elements)
             self.error = None
         except ValueError as exc:  # p. ej. una barra mayor que la comercial
@@ -255,22 +258,25 @@ class MainWindow(QMainWindow):
         root = QTreeWidgetItem([self.project.name])
         root.setIcon(0, style.standardIcon(QStyle.StandardPixmap.SP_DirHomeIcon))
         self.tree.addTopLevelItem(root)
-        level_items: dict[str, QTreeWidgetItem] = {}
+        nodes: dict[tuple[str, ...], QTreeWidgetItem] = {(): root}
         selected_item: QTreeWidgetItem | None = None
+        first_item: QTreeWidgetItem | None = None
         for index, element in enumerate(self.project.elements):
-            if element.level not in level_items:
-                level_item = QTreeWidgetItem(root, [element.level])
-                level_item.setIcon(0, style.standardIcon(QStyle.StandardPixmap.SP_DirIcon))
-                level_items[element.level] = level_item
-            item = QTreeWidgetItem(level_items[element.level],
-                                   [f"{element.name}  ·  {element.element_type.value}  ×{element.quantity}"])
+            path = element.path  # estructura / nivel y subestructura, los que tenga
+            for depth in range(1, len(path) + 1):
+                if path[:depth] not in nodes:
+                    node = QTreeWidgetItem(nodes[path[:depth - 1]], [path[depth - 1]])
+                    node.setIcon(0, style.standardIcon(QStyle.StandardPixmap.SP_DirIcon))
+                    nodes[path[:depth]] = node
+            item = QTreeWidgetItem(nodes[path], [f"{element.name}  ·  {element.element_type.value}  ×{element.quantity}"])
             item.setIcon(0, style.standardIcon(QStyle.StandardPixmap.SP_FileIcon))
             item.setData(0, Qt.ItemDataRole.UserRole, index)
+            first_item = first_item or item
             if element is target:
                 selected_item = item
         self.tree.expandAll()
-        if selected_item is None and self.project.elements:
-            selected_item = level_items[self.project.elements[0].level].child(0)
+        if selected_item is None:
+            selected_item = first_item
         self._element = None
         if selected_item is not None:
             self._element = self.project.elements[selected_item.data(0, Qt.ItemDataRole.UserRole)]
@@ -284,9 +290,9 @@ class MainWindow(QMainWindow):
 
     def _fill_tables(self, select_mark: str | None = None) -> None:
         schedules = self.result.element_schedules if self.result else []
-        self.project_table.populate(schedules, self.result.dimension_labels if self.result else ["A"])
+        self.project_table.populate(schedules)
         schedule = self._element_schedule()
-        self.bars_table.populate([schedule] if schedule else [], dimension_labels(schedule.lines) if schedule else ["A"])
+        self.bars_table.populate([schedule] if schedule else [])
         self.summary.populate(self.result)
         self.plan_table.populate(self.result)
         if select_mark is not None and (row := self.bars_table.row_of(select_mark)) is not None:
@@ -296,9 +302,8 @@ class MainWindow(QMainWindow):
     def _update_chrome(self) -> None:
         element = self._element
         if element is not None:
-            self.element_title.setText(
-                f"<b>{element.name}</b> &nbsp;·&nbsp; {element.element_type.value} &nbsp;·&nbsp; {element.level} "
-                f"&nbsp;·&nbsp; {element.quantity} und")
+            first, *rest = (escape(part) for part in element.heading.split("  ·  "))
+            self.element_title.setText(f"<b>{first}</b>" + "".join(f" &nbsp;·&nbsp; {part}" for part in rest))
         else:
             self.element_title.setText("Seleccione un elemento del árbol, o cree uno con «Nuevo elemento».")
         self.banner.setVisible(self.error is not None)
@@ -346,23 +351,26 @@ class MainWindow(QMainWindow):
             self.detail.show_line(self.project_table.line_for_row(rows[0].row()))
 
     # ------------------------------------------------------------------ elementos
-    def _check_unique(self, name: str, level: str, ignore: StructuralElement | None = None) -> None:
+    def _check_unique(self, name: str, level: str, substructure: str = "", ignore: StructuralElement | None = None) -> None:
         for other in self.project.elements:
-            if other is not ignore and other.name == name and other.level == level:
-                raise ValueError(f"Ya existe el elemento {name!r} en {level!r}.")
+            if other is not ignore and (other.name, other.level, other.substructure) == (name, level, substructure):
+                where = " / ".join(part for part in (level, substructure) if part)
+                raise ValueError(f"Ya existe el elemento {name!r}" + (f" en {where!r}." if where else "."))
 
-    def add_element_values(self, name: str, element_type: ElementType, level: str, quantity: int) -> StructuralElement:
-        self._check_unique(name, level)
-        element = StructuralElement(name, element_type, level, quantity)
+    def add_element_values(self, name: str, element_type: ElementType, level: str = "", quantity: int = 1,
+                           substructure: str = "") -> StructuralElement:
+        self._check_unique(name, level.strip(), substructure.strip())
+        element = StructuralElement(name, element_type, level, quantity, substructure=substructure)
         self.project.elements.append(element)
         self._mark_modified()
         self.refresh(select=element)
         return element
 
     def update_element_values(self, element: StructuralElement, name: str, element_type: ElementType, level: str,
-                              quantity: int) -> None:
-        self._check_unique(name, level, ignore=element)
-        element.name, element.element_type, element.level, element.quantity = name, element_type, level, quantity
+                              quantity: int, substructure: str = "") -> None:
+        self._check_unique(name, level.strip(), substructure.strip(), ignore=element)
+        element.name, element.element_type, element.quantity = name, element_type, quantity
+        element.level, element.substructure = level.strip(), substructure.strip()
         self._mark_modified()
         self.refresh(select=element)
 
@@ -374,7 +382,8 @@ class MainWindow(QMainWindow):
         self.refresh()
 
     def add_element(self) -> None:
-        dialog = ElementDialog(self, levels=self.project.levels)
+        dialog = ElementDialog(self, levels=self.project.levels, substructures=self.project.substructures,
+                               group_label=self.project.group_label)
         if dialog.exec():
             try:
                 self.add_element_values(*dialog.values())
@@ -385,7 +394,7 @@ class MainWindow(QMainWindow):
         element = self._element
         if element is None:
             return
-        dialog = ElementDialog(self, element, self.project.levels)
+        dialog = ElementDialog(self, element, self.project.levels, self.project.substructures, self.project.group_label)
         if dialog.exec():
             try:
                 self.update_element_values(element, *dialog.values())
@@ -397,7 +406,8 @@ class MainWindow(QMainWindow):
         if element is None:
             return
         if self._ask("Eliminar elemento",
-                     f"¿Eliminar el elemento {element.name} ({element.level}) y sus {len(element.groups)} marcas de barras?"):
+                     f"¿Eliminar el elemento {element.name}{f' ({element.location})' if element.location else ''} y sus "
+                     f"{len(element.groups)} marcas de barras?"):
             self.delete_element_object(element)
 
     # ------------------------------------------------------------------ barras
@@ -499,6 +509,10 @@ class MainWindow(QMainWindow):
         if self._confirm_discard():
             self.set_project(build_catalog_project())
 
+    def open_bridge(self) -> None:
+        if self._confirm_discard():
+            self.set_project(build_bridge_project())
+
     def open_path(self, path: Path) -> bool:
         try:
             self.set_project(load_project(path), path)
@@ -549,13 +563,14 @@ class MainWindow(QMainWindow):
     def write_excel(self, path: Path) -> Path:
         if self.result is None:
             raise ValueError(self.error or "No hay planilla que exportar.")
-        return ExcelExporter(self.project.name, self.project.author).export(self.result, path)
+        return ExcelExporter(self.project.name, self.project.author, info=self.project.header_fields(),
+                             logo_png=self.project.logo_png).export(self.result, path)
 
     def write_pdf(self, path: Path) -> Path:
         if self.result is None:
             raise ValueError(self.error or "No hay planilla que exportar.")
-        return PdfExporter(self.project.name, self.project.author, page_size=self.project.paper).export(
-            self.result, path)
+        return PdfExporter(self.project.name, self.project.author, page_size=self.project.paper,
+                           info=self.project.header_fields(), logo_png=self.project.logo_png).export(self.result, path)
 
     def _export(self, kind: str, suffix: str, writer) -> None:
         suggested = Path(self.project.name.replace(" ", "_") + suffix).as_posix()
